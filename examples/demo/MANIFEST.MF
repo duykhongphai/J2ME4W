@@ -1,0 +1,7 @@
+Manifest-Version: 1.0
+MIDlet-Name: J2ME4W Demo
+MIDlet-Vendor: j2me4w
+MIDlet-Version: 1.0
+MIDlet-1: J2ME4W Demo, , DemoMIDlet
+MicroEdition-Profile: MIDP-2.0
+MicroEdition-Configuration: CLDC-1.1

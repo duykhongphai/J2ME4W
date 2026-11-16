@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>J2ME4W</title>
+  <meta name="description" content="Run J2ME (MIDP 2.0) games in the browser with a JVM written in TypeScript." />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="logo">J2ME</span><span class="brand-4w">4W</span></div>
+    <div class="actions">
+      <label class="btn primary" title="Open a .jar (and optionally its .jad)">
+        <input id="file" type="file" accept=".jar,.jad" multiple hidden />
+        Open JAR
+      </label>
+      <button id="demo" class="btn">Demo</button>
+      <button id="restart" class="btn" disabled>Restart</button>
+      <button id="mute" class="btn" aria-pressed="false" title="Mute audio">Sound on</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="device" aria-label="Phone">
+      <div class="screen-wrap" id="screenWrap">
+        <canvas id="screen" width="240" height="320" tabindex="0" aria-label="Phone screen"></canvas>
+        <div id="overlay" class="overlay">
+          <p class="overlay-title">Drop a .jar file here</p>
+          <p class="overlay-sub">or use <b>Open JAR</b> · <b>Demo</b> runs a built-in MIDlet</p>
+        </div>
+      </div>
+      <div class="softbar">
+        <span id="softLeft"></span>
+        <span id="softRight"></span>
+      </div>
+      <div class="keypad" id="keypad">
+        <button data-key="-6" class="k soft">◤</button>
+        <button data-key="-1" class="k nav">▲</button>
+        <button data-key="-7" class="k soft">◥</button>
+        <button data-key="-3" class="k nav">◀</button>
+        <button data-key="-5" class="k fire">OK</button>
+        <button data-key="-4" class="k nav">▶</button>
+        <button data-key="-8" class="k soft small">C</button>
+        <button data-key="-2" class="k nav">▼</button>
+        <span></span>
+        <button data-key="49" class="k num">1</button>
+        <button data-key="50" class="k num">2<small>abc</small></button>
+        <button data-key="51" class="k num">3<small>def</small></button>
+        <button data-key="52" class="k num">4<small>ghi</small></button>
+        <button data-key="53" class="k num">5<small>jkl</small></button>
+        <button data-key="54" class="k num">6<small>mno</small></button>
+        <button data-key="55" class="k num">7<small>pqrs</small></button>
+        <button data-key="56" class="k num">8<small>tuv</small></button>
+        <button data-key="57" class="k num">9<small>wxyz</small></button>
+        <button data-key="42" class="k num">*</button>
+        <button data-key="48" class="k num">0</button>
+        <button data-key="35" class="k num">#</button>
+      </div>
+    </section>
+
+    <aside class="panel">
+      <div class="card">
+        <h2 id="appName">No MIDlet loaded</h2>
+        <p id="appInfo" class="muted">J2ME4W runs MIDP 2.0 / CLDC 1.1 applications on a Java virtual machine written in TypeScript. Nothing is uploaded: the JAR stays in your browser.</p>
+        <label class="field" id="midletField" hidden>MIDlet
+          <select id="midletSelect"></select>
+        </label>
+        <div class="row">
+          <label class="field">Screen
+            <select id="size">
+              <option value="128x160">128 × 160</option>
+              <option value="176x208">176 × 208 (S60)</option>
+              <option value="176x220">176 × 220</option>
+              <option value="240x320" selected>240 × 320</option>
+              <option value="320x240">320 × 240</option>
+              <option value="360x640">360 × 640</option>
+            </select>
+          </label>
+          <label class="field">Zoom
+            <select id="zoom">
+              <option value="auto" selected>Fit</option>
+              <option value="1">1×</option>
+              <option value="2">2×</option>
+              <option value="3">3×</option>
+            </select>
+          </label>
+        </div>
+        <label class="check"><input type="checkbox" id="crisp" /> Pixel fonts (no anti-aliasing)</label>
+        <details class="advanced">
+          <summary>Network</summary>
+          <label class="field">Proxy URL
+            <input id="proxy" type="text" placeholder="/__j2me4w (this server)" spellcheck="false" autocomplete="off" />
+          </label>
+          <p class="hint">Online games reach their servers through this proxy (TCP over WebSocket and HTTP). It runs with <code>npm run dev</code> and <code>npm start</code>.</p>
+        </details>
+      </div>
+
+      <div class="card">
+        <h3>Keyboard</h3>
+        <dl class="keys">
+          <dt>Arrows</dt><dd>D-pad</dd>
+          <dt>Enter / Space</dt><dd>Fire (OK)</dd>
+          <dt>Q · W</dt><dd>Left · right soft key</dd>
+          <dt>0–9 · * · #</dt><dd>Number keys</dd>
+          <dt>Backspace</dt><dd>Clear</dd>
+        </dl>
+      </div>
+
+      <details class="card log" id="logBox">
+        <summary>Console <span id="logCount" class="badge" hidden></span></summary>
+        <pre id="log"></pre>
+      </details>
+    </aside>
+  </main>
+
+  <dialog id="textDialog" class="dialog">
+    <form method="dialog">
+      <label id="textTitle" for="textInput">Enter text</label>
+      <textarea id="textInput" rows="3"></textarea>
+      <div class="dialog-actions">
+        <button value="cancel" class="btn">Cancel</button>
+        <button value="ok" class="btn primary">OK</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script type="module" src="/src/web/main.ts"></script>
+</body>
+</html>

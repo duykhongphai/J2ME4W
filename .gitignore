@@ -1,0 +1,6 @@
+node_modules/
+dist/
+build/
+public/*.jar
+test/out/
+*.log

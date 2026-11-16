@@ -1,0 +1,8 @@
+Manifest-Version: 1.0
+MIDlet-Name: Probe
+MIDlet-Vendor: j2me4w
+MIDlet-Version: 1.0
+MIDlet-1: Probe, , ProbeMIDlet
+MicroEdition-Profile: MIDP-2.0
+MicroEdition-Configuration: CLDC-1.1
+Probe-Attr: 42

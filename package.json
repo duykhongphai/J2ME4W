@@ -1,0 +1,27 @@
+{
+  "name": "j2me4w",
+  "version": "0.1.0",
+  "private": true,
+  "description": "J2ME (MIDP 2.0 / CLDC 1.1) emulator for the web, with a JVM written in TypeScript",
+  "type": "module",
+  "scripts": {
+    "build:rt": "node scripts/build-rt.mjs",
+    "build:tests": "node scripts/build-tests.mjs",
+    "dev": "npm run build:rt && vite",
+    "build": "npm run build:rt && tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run build:rt && npm run build:tests && tsx test/run-node.ts",
+    "start": "node scripts/serve.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/ws": "^8.18.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.3"
+  },
+  "dependencies": {
+    "fflate": "^0.8.2",
+    "ws": "^8.23.0"
+  }
+}
