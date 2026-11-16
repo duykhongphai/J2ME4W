@@ -17,7 +17,7 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:5173, then press **Demo** or **Open JAR** (you can also drop a `.jar`, with its
+Open http://localhost:5173, then open the built-in demo or press **Add JAR** (you can also drop a `.jar`, with its
 `.jad` if you have one, onto the page).
 
 ```bash
@@ -26,8 +26,21 @@ npm run build     # static site in dist/
 npm start         # serve dist/ + the network proxy on http://127.0.0.1:8080
 ```
 
-Controls: arrow keys = D-pad, Enter/Space = fire, Q / W = left / right soft key, 0-9 * # = keypad,
-Backspace = clear. The on-screen keypad and touch/mouse on the screen also work.
+### Using it
+
+- **Library**: games you add are kept in the browser (IndexedDB) with their icon, and stay installed
+  between visits. Re-adding a newer JAR of the same game updates it and keeps its saved data. The
+  ⋮ menu on each game has Settings, Rename, Clear saved data and Delete.
+- **Per-game settings** (inspired by J2ME-Loader): resolution, scaling (fit / whole multiples /
+  fill / 1×), smooth filter, background, orientation, font sizes and anti-aliasing, keypad
+  (auto / always / never, phone or gamepad layout, opacity, haptics), pause when hidden, and system
+  properties such as `microedition.platform`.
+- **Phones**: the keypad sits under the screen in portrait and becomes translucent clusters on both
+  sides in landscape. The D-pad follows a sliding finger; the gamepad layout has an 8-way joystick.
+  The Android back button opens the game menu, a second press returns to the library. Add the page to
+  the home screen to run it as an app.
+- **PC keyboard**: arrows = D-pad, Enter/Space = fire, Q / W = left / right soft key, 0-9 = digits,
+  E / R = * / #, Backspace = clear, Esc or M = game menu, F = fullscreen.
 
 ## Online games (network proxy)
 

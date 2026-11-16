@@ -1,200 +1,55 @@
-// Browser host: screen, keypad, keyboard/pointer input, storage, audio and file loading.
+// App shell: game library (IndexedDB), import, per-app settings, routing between library and player.
 import './style.css';
-import { Emulator, loadSuite, unzip, type Suite } from '../emulator';
-import { CanvasFontRenderer, defaultFontSizes } from '../midp/fonts';
-import type { RecordStorage } from '../midp/platform';
-import { Surface } from '../midp/surface';
+import { loadSuite, unzip, type Suite } from '../emulator';
 import { WebAudioHost } from './audio';
 import { ProxyNetHost } from './net';
+import { coarsePointer, Player } from './player';
+import {
+  AppStore, clearAppData, DEFAULT_SETTINGS, newId, type AppEntry, type AppSettings,
+} from './store';
 
-const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
-const canvas = $<HTMLCanvasElement>('screen');
-const ctx = canvas.getContext('2d')!;
-const overlay = $<HTMLDivElement>('overlay');
-const softLeft = $<HTMLSpanElement>('softLeft');
-const softRight = $<HTMLSpanElement>('softRight');
-const logEl = $<HTMLPreElement>('log');
-const logCount = $<HTMLSpanElement>('logCount');
-const appName = $<HTMLHeadingElement>('appName');
-const appInfo = $<HTMLParagraphElement>('appInfo');
-const sizeSel = $<HTMLSelectElement>('size');
-const zoomSel = $<HTMLSelectElement>('zoom');
-const crispBox = $<HTMLInputElement>('crisp');
-const midletField = $<HTMLLabelElement>('midletField');
-const midletSelect = $<HTMLSelectElement>('midletSelect');
-const restartBtn = $<HTMLButtonElement>('restart');
-const muteBtn = $<HTMLButtonElement>('mute');
-const proxyInput = $<HTMLInputElement>('proxy');
+const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 
+// ------------------------------------------------------------------ globals
+const GLOBAL_KEY = 'j2me4w:global';
+const global = (() => {
+  try { return { proxy: '', muted: false, ...JSON.parse(localStorage.getItem(GLOBAL_KEY) ?? '{}') }; }
+  catch { return { proxy: '', muted: false }; }
+})();
+const saveGlobal = () => { try { localStorage.setItem(GLOBAL_KEY, JSON.stringify(global)); } catch { /* ignore */ } };
+
+const store = new AppStore();
 const audio = new WebAudioHost();
-const netHost = new ProxyNetHost(() => proxyInput.value.trim(), (m) => log(m));
+const logEl = $<HTMLPreElement>('log');
+const net = new ProxyNetHost(() => global.proxy, (m) => log(m));
+let apps: AppEntry[] = [];
 let rt: Map<string, Uint8Array> | null = null;
-let emu: Emulator | null = null;
-let suite: Suite | null = null;
-let imageData: ImageData | null = null;
-let errors = 0;
 
-// ------------------------------------------------------------------ settings
-const SETTINGS_KEY = 'j2me4w:settings';
-function loadSettings() {
-  try {
-    const s = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}');
-    if (s.size) sizeSel.value = s.size;
-    if (s.zoom) zoomSel.value = s.zoom;
-    crispBox.checked = !!s.crisp;
-    if (typeof s.proxy === 'string') proxyInput.value = s.proxy;
-    if (s.muted) setMuted(true);
-  } catch { /* ignore */ }
-}
-function saveSettings() {
-  try {
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify({
-      size: sizeSel.value, zoom: zoomSel.value, crisp: crispBox.checked, muted: audio.muted, proxy: proxyInput.value.trim(),
-    }));
-  } catch { /* ignore */ }
-}
+const libraryView = $('libraryView');
+const playerView = $('playerView');
+const menuSheet = $('menuSheet');
+const consoleSheet = $('consoleSheet');
 
-// ------------------------------------------------------------------ console
 function log(line: string, err = false) {
   const span = document.createElement('span');
-  if (err) { span.className = 'err'; errors++; logCount.textContent = String(errors); logCount.hidden = false; }
+  if (err) span.className = 'err';
   span.textContent = line + '\n';
   logEl.appendChild(span);
-  while (logEl.childNodes.length > 800) logEl.removeChild(logEl.firstChild!);
-  logEl.scrollTop = logEl.scrollHeight;
+  while (logEl.childNodes.length > 1500) logEl.removeChild(logEl.firstChild!);
+  if (!consoleSheet.hidden) logEl.scrollTop = logEl.scrollHeight;
   (err ? console.warn : console.log)(line);
 }
 
-// ------------------------------------------------------------------ screen
-function screenSize(): [number, number] {
-  const [w, h] = sizeSel.value.split('x').map(Number);
-  return [w, h];
+let toastTimer: ReturnType<typeof setTimeout> | null = null;
+function toast(msg: string, ms = 2600) {
+  const t = $('toast');
+  t.textContent = msg;
+  t.hidden = false;
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { t.hidden = true; }, ms);
 }
 
-let lastFrame: Surface | null = null;
-
-function applyZoom() {
-  const [w, h] = emu ? [emu.platform.width, emu.platform.height] : screenSize();
-  if (canvas.width !== w || canvas.height !== h) {
-    canvas.width = w;
-    canvas.height = h;
-    imageData = ctx.createImageData(w, h);
-    if (lastFrame && lastFrame.w === w && lastFrame.h === h) present(lastFrame);
-  }
-  let z: number;
-  if (zoomSel.value === 'auto') {
-    const maxW = Math.min(window.innerWidth - 64, 720);
-    const maxH = window.innerHeight - 360;
-    z = Math.max(1, Math.min(maxW / w, maxH / h));
-    z = z >= 2 ? Math.floor(z) : Math.max(1, Math.floor(z * 2) / 2);
-  } else {
-    z = Number(zoomSel.value);
-  }
-  canvas.style.width = `${w * z}px`;
-  canvas.style.height = `${h * z}px`;
-  const device = canvas.closest('.device') as HTMLElement;
-  device.style.width = `${Math.max(w * z + 44, 260)}px`;
-}
-
-function present(s: Surface) {
-  lastFrame = s;
-  if (!imageData || imageData.width !== s.w || imageData.height !== s.h) imageData = ctx.createImageData(s.w, s.h);
-  new Uint32Array(imageData.data.buffer).set(s.px);
-  ctx.putImageData(imageData, 0, 0);
-}
-
-function clearScreen() {
-  ctx.fillStyle = '#000';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-}
-
-function showOverlay(title: string, sub = '') {
-  overlay.hidden = false;
-  overlay.querySelector('.overlay-title')!.textContent = title;
-  overlay.querySelector('.overlay-sub')!.innerHTML = sub;
-}
-
-// ------------------------------------------------------------------ host services
-class LocalRecordStorage implements RecordStorage {
-  constructor(private prefix: string) {}
-  get(n: string) {
-    try {
-      const v = localStorage.getItem(this.prefix + n);
-      if (v == null) return null;
-      const bin = atob(v);
-      const out = new Uint8Array(bin.length);
-      for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-      return out;
-    } catch {
-      return null;
-    }
-  }
-  set(n: string, d: Uint8Array) {
-    try {
-      let bin = '';
-      for (let i = 0; i < d.length; i += 4096) bin += String.fromCharCode.apply(null, Array.from(d.subarray(i, i + 4096)));
-      localStorage.setItem(this.prefix + n, btoa(bin));
-      return true;
-    } catch {
-      return false;
-    }
-  }
-  delete(n: string) {
-    const had = localStorage.getItem(this.prefix + n) != null;
-    localStorage.removeItem(this.prefix + n);
-    return had;
-  }
-  list() {
-    const out: string[] = [];
-    for (let i = 0; i < localStorage.length; i++) {
-      const k = localStorage.key(i)!;
-      if (k.startsWith(this.prefix)) out.push(k.slice(this.prefix.length));
-    }
-    return out;
-  }
-}
-
-async function decodeImage(bytes: Uint8Array): Promise<Surface | null> {
-  try {
-    const bmp = await createImageBitmap(new Blob([bytes.slice().buffer as ArrayBuffer]));
-    const c = typeof OffscreenCanvas !== 'undefined'
-      ? new OffscreenCanvas(bmp.width, bmp.height)
-      : Object.assign(document.createElement('canvas'), { width: bmp.width, height: bmp.height });
-    const cx = (c as HTMLCanvasElement).getContext('2d')!;
-    cx.drawImage(bmp, 0, 0);
-    const d = cx.getImageData(0, 0, bmp.width, bmp.height);
-    const s = new Surface(bmp.width, bmp.height, 0);
-    s.px.set(new Uint32Array(d.data.buffer));
-    return s;
-  } catch {
-    return null;
-  }
-}
-
-const textDialog = $<HTMLDialogElement>('textDialog');
-const textInput = $<HTMLTextAreaElement>('textInput');
-function editText(title: string | null, text: string, maxSize: number, constraints: number): Promise<string | null> {
-  return new Promise((resolve) => {
-    $<HTMLLabelElement>('textTitle').textContent = title || 'Enter text';
-    textInput.value = text;
-    textInput.maxLength = maxSize;
-    const kind = constraints & 0xffff;
-    textInput.inputMode = kind === 2 ? 'numeric' : kind === 5 ? 'decimal' : kind === 3 ? 'tel' : kind === 1 ? 'email' : 'text';
-    textDialog.returnValue = '';
-    const done = () => {
-      textDialog.removeEventListener('close', done);
-      resolve(textDialog.returnValue === 'ok' ? textInput.value : null);
-      canvas.focus();
-    };
-    textDialog.addEventListener('close', done);
-    textDialog.showModal();
-    textInput.focus();
-    textInput.select();
-  });
-}
-
-// ------------------------------------------------------------------ lifecycle
-async function getRuntime(): Promise<Map<string, Uint8Array>> {
+async function runtime(): Promise<Map<string, Uint8Array>> {
   if (!rt) {
     const res = await fetch(new URL('rt.jar', document.baseURI));
     if (!res.ok) throw new Error(`Cannot load rt.jar (${res.status})`);
@@ -203,247 +58,560 @@ async function getRuntime(): Promise<Map<string, Uint8Array>> {
   return rt;
 }
 
-function stop() {
-  lastFrame = null;
-  if (emu) {
-    emu.stop();
-    emu = null;
-  }
-  audio.closeAll();
+// ------------------------------------------------------------------ dialogs
+function dialogResult(d: HTMLDialogElement): Promise<string> {
+  return new Promise((resolve) => {
+    d.returnValue = '';
+    const done = () => { d.removeEventListener('close', done); resolve(d.returnValue); };
+    d.addEventListener('close', done);
+    d.showModal();
+  });
 }
 
-async function start(s: Suite, midletIndex = 0) {
-  stop();
-  suite = s;
-  const boot = await getRuntime();
-  applyZoom();
-  clearScreen();
-  overlay.hidden = true;
-  softLeft.textContent = '';
-  softRight.textContent = '';
-  const [w, h] = screenSize();
-  const m = s.midlets[midletIndex];
-  appName.textContent = s.name;
-  appInfo.textContent = [s.properties['MIDlet-Vendor'], s.properties['MIDlet-Version'] && 'v' + s.properties['MIDlet-Version'], m?.className]
-    .filter(Boolean).join(' · ');
-  midletField.hidden = s.midlets.length < 2;
-  midletSelect.innerHTML = '';
-  s.midlets.forEach((x, i) => midletSelect.add(new Option(x.name, String(i), i === midletIndex, i === midletIndex)));
-  restartBtn.disabled = false;
-  document.title = `${s.name} · J2ME4W`;
+async function confirmBox(text: string, ok = 'OK', danger = false): Promise<boolean> {
+  const d = $<HTMLDialogElement>('confirmDialog');
+  $('confirmText').textContent = text;
+  $<HTMLInputElement>('promptInput').hidden = true;
+  const b = $('confirmOk');
+  b.textContent = ok;
+  b.style.background = danger ? 'var(--danger)' : '';
+  b.style.borderColor = danger ? 'var(--danger)' : '';
+  return (await dialogResult(d)) === 'ok';
+}
 
-  const e = new Emulator({
-    bootClasspath: boot,
-    suite: s,
-    midletIndex,
-    width: w,
-    height: h,
-    fonts: new CanvasFontRenderer(defaultFontSizes(w), undefined, undefined, crispBox.checked),
-    storage: new LocalRecordStorage(`j2me4w:rms:${s.name}:`),
-    print: (stream, line) => log(line, stream === 'err'),
-    host: {
-      present,
-      setSoftLabels: (l, r) => { softLeft.textContent = l ?? ''; softRight.textContent = r ?? ''; },
-      vibrate: (ms) => { try { navigator.vibrate?.(Math.min(ms, 1000)); } catch { /* ignore */ } },
-      editText,
-      openUrl: (url) => { if (/^https?:/i.test(url)) window.open(url, '_blank', 'noopener'); },
-      onFatal: (msg) => showOverlay('MIDlet failed to start', escapeHtml(msg)),
-      decodeImage,
-      audio,
-      net: netHost,
-    },
+async function promptBox(text: string, value: string): Promise<string | null> {
+  const d = $<HTMLDialogElement>('confirmDialog');
+  $('confirmText').textContent = text;
+  const input = $<HTMLInputElement>('promptInput');
+  input.hidden = false;
+  input.value = value;
+  $('confirmOk').textContent = 'Save';
+  $('confirmOk').style.background = '';
+  setTimeout(() => input.select(), 0);
+  return (await dialogResult(d)) === 'ok' ? input.value.trim() : null;
+}
+
+function editText(title: string | null, text: string, maxSize: number, constraints: number): Promise<string | null> {
+  const d = $<HTMLDialogElement>('textDialog');
+  const input = $<HTMLTextAreaElement>('textInput');
+  $('textTitle').textContent = title || 'Enter text';
+  input.value = text;
+  input.maxLength = maxSize;
+  const kind = constraints & 0xffff;
+  input.inputMode = kind === 2 ? 'numeric' : kind === 5 ? 'decimal' : kind === 3 ? 'tel' : kind === 1 ? 'email' : 'text';
+  player.releaseKeys();
+  const r = dialogResult(d).then((v) => (v === 'ok' ? input.value : null));
+  setTimeout(() => { input.focus(); input.select(); }, 0);
+  return r;
+}
+
+// ------------------------------------------------------------------ player
+const player = new Player({
+  root: playerView,
+  body: $('playerBody'),
+  stage: $('stage'),
+  canvas: $<HTMLCanvasElement>('screen'),
+  keypad: $('keypad'),
+  overlay: $('overlay'),
+  fps: $('fps'),
+}, {
+  audio,
+  net,
+  log,
+  editText,
+  onExit: (reason) => {
+    if (playerView.hidden) return;
+    player.showOverlay(reason === 'MIDlet exited' ? 'Game closed' : 'Stopped',
+      reason === 'MIDlet exited' ? '' : reason);
+  },
+});
+
+let exiting = false;
+
+function syncPlayerButtons() {
+  $('kbBtn').setAttribute('aria-pressed', String(player.keypadShown));
+  const snd = $('soundBtn');
+  snd.querySelector('use')!.setAttribute('href', audio.muted ? '#i-mute' : '#i-sound');
+  snd.setAttribute('aria-label', audio.muted ? 'Unmute' : 'Mute');
+  const kpItem = menuSheet.querySelector('[data-action="keypad"]')!;
+  kpItem.textContent = player.keypadShown ? 'Hide keypad' : 'Show keypad';
+  const fsItem = menuSheet.querySelector('[data-action="fullscreen"]')!;
+  fsItem.textContent = document.fullscreenElement ? 'Exit fullscreen' : 'Fullscreen';
+}
+
+async function chooseMidlet(suite: Suite): Promise<number | null> {
+  if (suite.midlets.length < 2) return 0;
+  const box = $('midletChoices');
+  box.innerHTML = '';
+  suite.midlets.forEach((m, i) => {
+    const b = document.createElement('button');
+    b.className = 'sheet-item';
+    b.value = String(i);
+    b.textContent = m.name;
+    box.appendChild(b);
   });
-  e.onExit((_code, reason) => {
-    if (emu !== e) return;
-    audio.closeAll();
-    if (!overlay.hidden) return;
-    showOverlay(reason === 'MIDlet exited' ? 'MIDlet exited' : 'Stopped', 'Press <b>Restart</b> to run it again');
-  });
-  emu = e;
-  log(`— starting ${m?.className ?? '?'} (${w}×${h})`);
+  const r = await dialogResult($<HTMLDialogElement>('midletDialog'));
+  return r === '' || r === 'cancel' ? null : Number(r);
+}
+
+async function play(app: AppEntry) {
+  let suite: Suite;
   try {
-    e.start();
-  } catch (err) {
-    showOverlay('Cannot start MIDlet', escapeHtml(String(err)));
-    log(String(err), true);
-  }
-  canvas.focus();
-}
-
-function escapeHtml(s: string) {
-  return s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
-}
-
-async function openFiles(files: FileList | File[]) {
-  const list = Array.from(files);
-  const jarFile = list.find((f) => /\.jar$/i.test(f.name)) ?? list.find((f) => !/\.jad$/i.test(f.name));
-  const jadFile = list.find((f) => /\.jad$/i.test(f.name));
-  if (!jarFile) {
-    showOverlay('A .jad alone is not enough', 'Select the .jar file too (you can pick both at once)');
+    let jar: Uint8Array, jad: string | undefined;
+    if (app.builtin) {
+      const res = await fetch(new URL('demo.jar', document.baseURI));
+      if (!res.ok) throw new Error('demo.jar is missing (run npm run build:rt)');
+      jar = new Uint8Array(await res.arrayBuffer());
+    } else {
+      const stored = await store.getJar(app.id);
+      if (!stored) throw new Error('JAR data is missing; delete and re-add this game');
+      jar = stored.jar;
+      jad = stored.jad;
+    }
+    suite = loadSuite(jar, jad);
+  } catch (e) {
+    toast(String(e instanceof Error ? e.message : e), 4000);
     return;
   }
-  try {
-    const jar = new Uint8Array(await jarFile.arrayBuffer());
-    const jad = jadFile ? await jadFile.text() : undefined;
-    const s = loadSuite(jar, jad);
-    if (!s.midlets.length) throw new Error('No MIDlet-1 entry found in the manifest');
-    if (s.name === 'MIDlet') s.name = jarFile.name.replace(/\.jar$/i, '');
-    await start(s);
-  } catch (err) {
-    showOverlay('Cannot open this file', escapeHtml(String(err instanceof Error ? err.message : err)));
-    log(String(err), true);
+  const idx = await chooseMidlet(suite);
+  if (idx === null) return;
+  const boot = await runtime();
+
+  libraryView.hidden = true;
+  playerView.hidden = false;
+  menuSheet.hidden = true;
+  consoleSheet.hidden = true;
+  $('playerTitle').textContent = app.name;
+  $<HTMLImageElement>('playerIcon').src = app.icon ?? 'icon.svg';
+  $('menuTitle').textContent = app.name;
+  document.title = `${app.name} · J2ME4W`;
+  history.pushState({ view: 'player' }, '');
+  if (coarsePointer() && app.settings.orientation !== 'auto') void player.enterFullscreen();
+
+  await player.start(app, suite, boot, idx);
+  syncPlayerButtons();
+  app.lastPlayed = Date.now();
+  void store.put(app).catch(() => {});
+}
+
+function showLibrary() {
+  player.stop();
+  void player.exitFullscreen();
+  playerView.hidden = true;
+  libraryView.hidden = false;
+  document.title = 'J2ME4W';
+  renderLibrary();
+}
+
+/** Leaves the player (also pops the history entry pushed by play()). */
+function exitToLibrary() {
+  if (playerView.hidden) return;
+  if (history.state?.view === 'player') {
+    exiting = true;
+    history.back();
   }
+  showLibrary();
 }
 
-async function runDemo() {
-  try {
-    const res = await fetch(new URL('demo.jar', document.baseURI));
-    if (!res.ok) throw new Error(`demo.jar not found (${res.status})`);
-    await start(loadSuite(new Uint8Array(await res.arrayBuffer())));
-  } catch (err) {
-    showOverlay('Cannot load the demo', escapeHtml(String(err)));
+function openMenu() {
+  if (playerView.hidden) return;
+  player.releaseKeys();
+  syncPlayerButtons();
+  menuSheet.hidden = false;
+  (menuSheet.querySelector('.sheet-item') as HTMLElement).focus();
+}
+
+window.addEventListener('popstate', () => {
+  if (exiting) { exiting = false; return; }
+  if (playerView.hidden) return;
+  // Android back button: first press opens the menu, a second press leaves the game
+  if (!menuSheet.hidden || !consoleSheet.hidden) {
+    showLibrary();
+    return;
   }
+  history.pushState({ view: 'player' }, '');
+  openMenu();
+});
+
+menuSheet.addEventListener('click', async (e) => {
+  const t = e.target as HTMLElement;
+  if (t === menuSheet) { menuSheet.hidden = true; return; }
+  const action = t.closest<HTMLElement>('[data-action]')?.dataset.action;
+  if (!action) return;
+  menuSheet.hidden = true;
+  switch (action) {
+    case 'keypad': player.toggleKeypad(); break;
+    case 'screenshot': player.screenshot(); toast('Screenshot saved'); break;
+    case 'fullscreen': await toggleFullscreen(); break;
+    case 'settings': if (player.app) await openSettings(player.app); break;
+    case 'log': consoleSheet.hidden = false; logEl.scrollTop = logEl.scrollHeight; break;
+    case 'restart': player.restart(); break;
+    case 'exit': exitToLibrary(); break;
+  }
+  syncPlayerButtons();
+});
+
+consoleSheet.addEventListener('click', (e) => {
+  const t = e.target as HTMLElement;
+  const action = t === consoleSheet ? 'close' : t.closest<HTMLElement>('[data-action]')?.dataset.action;
+  if (action === 'close') consoleSheet.hidden = true;
+  if (action === 'clear') logEl.textContent = '';
+  if (action === 'copy') void navigator.clipboard?.writeText(logEl.textContent ?? '').then(() => toast('Copied'));
+});
+
+$('overlay').addEventListener('click', (e) => {
+  const action = (e.target as HTMLElement).closest<HTMLElement>('[data-action]')?.dataset.action;
+  if (action === 'restart') player.restart();
+  if (action === 'library') exitToLibrary();
+});
+
+async function toggleFullscreen() {
+  if (document.fullscreenElement) await player.exitFullscreen();
+  else await player.enterFullscreen();
 }
 
-// ------------------------------------------------------------------ input
-const KEYMAP: Record<string, number> = {
-  ArrowUp: -1, ArrowDown: -2, ArrowLeft: -3, ArrowRight: -4,
-  Enter: -5, NumpadEnter: -5, Space: -5,
-  KeyQ: -6, F1: -6, BracketLeft: -6,
-  KeyW: -7, F2: -7, BracketRight: -7, Escape: -7,
-  Backspace: -8, Delete: -8,
-  Digit0: 48, Digit1: 49, Digit2: 50, Digit3: 51, Digit4: 52, Digit5: 53, Digit6: 54, Digit7: 55, Digit8: 56, Digit9: 57,
-  Numpad0: 48, Numpad1: 49, Numpad2: 50, Numpad3: 51, Numpad4: 52, Numpad5: 53, Numpad6: 54, Numpad7: 55, Numpad8: 56, Numpad9: 57,
-  NumpadMultiply: 42, NumpadDivide: 35,
-};
+$('backBtn').addEventListener('click', exitToLibrary);
+$('menuBtn').addEventListener('click', openMenu);
+$('floatMenu').addEventListener('click', openMenu);
+$('fsBtn').addEventListener('click', () => void toggleFullscreen());
+$('kbBtn').addEventListener('click', () => { player.toggleKeypad(); syncPlayerButtons(); });
+$('soundBtn').addEventListener('click', () => {
+  audio.setMuted(!audio.muted);
+  global.muted = audio.muted;
+  saveGlobal();
+  syncPlayerButtons();
+});
+document.addEventListener('fullscreenchange', () => { syncPlayerButtons(); player.layout(); });
 
-function keyCodeFor(e: KeyboardEvent): number | undefined {
-  if (e.key === '*') return 42;
-  if (e.key === '#') return 35;
-  return KEYMAP[e.code];
-}
-
-function keypadButton(code: number) {
-  return document.querySelector<HTMLButtonElement>(`.k[data-key="${code}"]`);
-}
-
+// hardware keyboard
 window.addEventListener('keydown', (e) => {
-  if (textDialog.open) return;
+  if (document.querySelector('dialog[open]')) return;
   const t = e.target as HTMLElement;
   if (t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA')) return;
-  const code = keyCodeFor(e);
-  if (code === undefined || !emu || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (playerView.hidden) return;
+  if (!menuSheet.hidden || !consoleSheet.hidden) {
+    if (e.key === 'Escape') { menuSheet.hidden = true; consoleSheet.hidden = true; e.preventDefault(); }
+    return;
+  }
+  if ((e.key === 'Escape' || e.code === 'KeyM') && !e.repeat) { e.preventDefault(); openMenu(); return; }
+  if (e.code === 'KeyF' && !e.repeat) { e.preventDefault(); void toggleFullscreen(); return; }
+  if (player.keyDown(e)) e.preventDefault();
+});
+window.addEventListener('keyup', (e) => { if (!playerView.hidden && player.keyUp(e)) e.preventDefault(); });
+window.addEventListener('blur', () => player.releaseKeys());
+
+// ------------------------------------------------------------------ settings dialog
+const settingsDialog = $<HTMLDialogElement>('settingsDialog');
+const form = $<HTMLFormElement>('settingsForm');
+const field = <T extends HTMLElement = HTMLInputElement>(name: string) => form.elements.namedItem(name) as unknown as T;
+
+function fillSettings(s: AppSettings) {
+  const preset = `${s.width}x${s.height}`;
+  const sel = field<HTMLSelectElement>('preset');
+  sel.value = [...sel.options].some((o) => o.value === preset) ? preset : 'custom';
+  field('width').value = String(s.width);
+  field('height').value = String(s.height);
+  (form.querySelector('.custom-size') as HTMLElement).hidden = sel.value !== 'custom';
+  field<HTMLSelectElement>('scale').value = s.scale;
+  field('background').value = s.background;
+  field<HTMLSelectElement>('orientation').value = s.orientation;
+  field('filter').checked = s.filter;
+  field('showFps').checked = s.showFps;
+  field('fontSmall').value = s.fontSmall ? String(s.fontSmall) : '';
+  field('fontMedium').value = s.fontMedium ? String(s.fontMedium) : '';
+  field('fontLarge').value = s.fontLarge ? String(s.fontLarge) : '';
+  field('fontAA').checked = s.fontAA;
+  field<HTMLSelectElement>('keypad').value = s.keypad;
+  field<HTMLSelectElement>('keypadType').value = s.keypadType;
+  field('keypadOpacity').value = String(s.keypadOpacity);
+  field<HTMLOutputElement>('opacityOut').value = `${Math.round(s.keypadOpacity * 100)}%`;
+  field('haptics').checked = s.haptics;
+  field('pauseWhenHidden').checked = s.pauseWhenHidden;
+  field<HTMLTextAreaElement>('sysProps').value = s.sysProps;
+}
+
+function readSettings(): AppSettings {
+  const num = (n: string) => Math.max(0, Math.min(48, parseInt(field(n).value, 10) || 0));
+  const sel = field<HTMLSelectElement>('preset').value;
+  let [w, h] = sel === 'custom'
+    ? [parseInt(field('width').value, 10), parseInt(field('height').value, 10)]
+    : sel.split('x').map(Number);
+  w = Math.max(64, Math.min(1024, w || 240));
+  h = Math.max(64, Math.min(1024, h || 320));
+  return {
+    width: w,
+    height: h,
+    scale: field<HTMLSelectElement>('scale').value as AppSettings['scale'],
+    background: field('background').value,
+    orientation: field<HTMLSelectElement>('orientation').value as AppSettings['orientation'],
+    filter: field('filter').checked,
+    showFps: field('showFps').checked,
+    fontSmall: num('fontSmall'),
+    fontMedium: num('fontMedium'),
+    fontLarge: num('fontLarge'),
+    fontAA: field('fontAA').checked,
+    keypad: field<HTMLSelectElement>('keypad').value as AppSettings['keypad'],
+    keypadType: field<HTMLSelectElement>('keypadType').value as AppSettings['keypadType'],
+    keypadOpacity: Number(field('keypadOpacity').value),
+    haptics: field('haptics').checked,
+    pauseWhenHidden: field('pauseWhenHidden').checked,
+    sysProps: field<HTMLTextAreaElement>('sysProps').value,
+  };
+}
+
+field<HTMLSelectElement>('preset').addEventListener('change', () => {
+  const v = field<HTMLSelectElement>('preset').value;
+  (form.querySelector('.custom-size') as HTMLElement).hidden = v !== 'custom';
+  if (v !== 'custom') {
+    const [w, h] = v.split('x');
+    field('width').value = w;
+    field('height').value = h;
+  }
+});
+field('keypadOpacity').addEventListener('input', () => {
+  field<HTMLOutputElement>('opacityOut').value = `${Math.round(Number(field('keypadOpacity').value) * 100)}%`;
+});
+
+const NEEDS_RESTART: (keyof AppSettings)[] = ['width', 'height', 'fontSmall', 'fontMedium', 'fontLarge', 'fontAA', 'sysProps'];
+
+async function openSettings(app: AppEntry) {
+  $('settingsTitle').textContent = app.name;
+  fillSettings(app.settings);
+  player.releaseKeys();
+  for (;;) {
+    const r = await dialogResult(settingsDialog);
+    if (r === 'reset') { fillSettings(DEFAULT_SETTINGS); continue; }
+    if (r !== 'save') return;
+    break;
+  }
+  const next = readSettings();
+  const restart = NEEDS_RESTART.some((k) => next[k] !== app.settings[k]);
+  app.settings = next;
+  await store.put(app);
+  if (player.app?.id === app.id && !playerView.hidden) {
+    if (restart) {
+      toast('Restarting with the new settings');
+      player.restart();
+    } else {
+      player.applySettings();
+    }
+    syncPlayerButtons();
+  } else {
+    toast('Settings saved');
+  }
+  renderLibrary();
+}
+
+// ------------------------------------------------------------------ library
+function formatSize(n: number) {
+  return n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`;
+}
+
+function renderLibrary() {
+  const list = $('appList');
+  const q = $<HTMLInputElement>('search').value.trim().toLowerCase();
+  const sort = $<HTMLSelectElement>('sort').value;
+  const shown = apps
+    .filter((a) => !q || a.name.toLowerCase().includes(q) || a.vendor.toLowerCase().includes(q))
+    .sort((a, b) => {
+      if (sort === 'name') return a.name.localeCompare(b.name);
+      if (sort === 'vendor') return a.vendor.localeCompare(b.vendor) || a.name.localeCompare(b.name);
+      if (!!a.builtin !== !!b.builtin) return a.builtin ? 1 : -1;
+      return Math.max(b.lastPlayed, b.addedAt) - Math.max(a.lastPlayed, a.addedAt);
+    });
+  list.innerHTML = '';
+  for (const app of shown) {
+    const li = document.createElement('li');
+    li.className = 'app-card';
+    li.tabIndex = 0;
+    li.setAttribute('role', 'button');
+    li.setAttribute('aria-label', `Play ${app.name}`);
+    const img = document.createElement('img');
+    img.className = 'app-icon';
+    img.alt = '';
+    img.src = app.icon ?? 'icon.svg';
+    const meta = document.createElement('div');
+    meta.className = 'app-meta';
+    const name = document.createElement('div');
+    name.className = 'app-name';
+    name.textContent = app.name;
+    const sub = document.createElement('div');
+    sub.className = 'app-sub';
+    sub.textContent = app.builtin ? 'Built-in demo' : [app.vendor, app.version && `v${app.version}`, formatSize(app.size)].filter(Boolean).join(' · ');
+    meta.append(name, sub);
+    const more = document.createElement('button');
+    more.className = 'icon-btn';
+    more.setAttribute('aria-label', `Options for ${app.name}`);
+    more.innerHTML = '<svg class="ic"><use href="#i-more" /></svg>';
+    more.addEventListener('click', (e) => { e.stopPropagation(); void appMenu(app); });
+    li.append(img, meta, more);
+    li.addEventListener('click', () => { audio.unlock(); void play(app); });
+    li.addEventListener('keydown', (e) => { if (e.key === 'Enter') void play(app); });
+    li.addEventListener('contextmenu', (e) => { e.preventDefault(); void appMenu(app); });
+    list.appendChild(li);
+  }
+  const empty = $('emptyState');
+  empty.hidden = shown.length > 0;
+  empty.querySelector('h2')!.textContent = q ? `No matches for “${q}”` : 'No games yet';
+}
+
+async function appMenu(app: AppEntry) {
+  const d = $<HTMLDialogElement>('appMenuDialog');
+  $<HTMLImageElement>('amIcon').src = app.icon ?? 'icon.svg';
+  $('amName').textContent = app.name;
+  $('amInfo').textContent = [app.vendor, app.version && `v${app.version}`].filter(Boolean).join(' · ');
+  for (const b of d.querySelectorAll<HTMLButtonElement>('[value="rename"],[value="delete"]')) b.hidden = !!app.builtin;
+  const r = await dialogResult(d);
+  switch (r) {
+    case 'play': void play(app); break;
+    case 'settings': await openSettings(app); break;
+    case 'rename': {
+      const n = await promptBox('Rename', app.name);
+      if (n) { app.name = n; await store.put(app); renderLibrary(); }
+      break;
+    }
+    case 'clear':
+      if (await confirmBox(`Delete the saved data (records, high scores) of “${app.name}”?`, 'Clear data', true)) {
+        toast(`Cleared ${clearAppData(app.id)} record store(s)`);
+      }
+      break;
+    case 'delete':
+      if (await confirmBox(`Delete “${app.name}” and its saved data?`, 'Delete', true)) {
+        await store.delete(app.id);
+        clearAppData(app.id);
+        apps = apps.filter((a) => a.id !== app.id);
+        renderLibrary();
+        toast(`Deleted ${app.name}`);
+      }
+      break;
+  }
+}
+
+function extractIcon(suite: Suite): string | null {
+  const path = (suite.properties['MIDlet-Icon'] || suite.midlets[0]?.icon || '').trim().replace(/^\//, '');
+  if (!path) return null;
+  const data = suite.files.get(path);
+  if (!data || data.length > 128 * 1024) return null;
+  let bin = '';
+  for (let i = 0; i < data.length; i += 0x8000) bin += String.fromCharCode.apply(null, Array.from(data.subarray(i, i + 0x8000)));
+  const type = data[0] === 0x89 ? 'image/png' : data[0] === 0xff ? 'image/jpeg' : 'image/gif';
+  return `data:${type};base64,${btoa(bin)}`;
+}
+
+async function installFiles(files: FileList | File[]) {
+  const list = Array.from(files);
+  const jars = list.filter((f) => /\.jar$/i.test(f.name) || f.type === 'application/java-archive');
+  const jads = list.filter((f) => /\.jad$/i.test(f.name));
+  if (!jars.length) {
+    toast(jads.length ? 'Select the .jar file too (you can pick the .jar and .jad together)' : 'Not a .jar file', 4000);
+    return;
+  }
+  let installed: AppEntry | null = null;
+  for (const f of jars) {
+    const base = f.name.replace(/\.jar$/i, '').toLowerCase();
+    const jadFile = jads.find((j) => j.name.replace(/\.jad$/i, '').toLowerCase() === base) ?? (jars.length === 1 ? jads[0] : undefined);
+    try {
+      const jar = new Uint8Array(await f.arrayBuffer());
+      const jad = jadFile ? await jadFile.text() : undefined;
+      const suite = loadSuite(jar, jad);
+      if (!suite.midlets.length) throw new Error('no MIDlet-1 entry in the manifest');
+      const name = suite.properties['MIDlet-Name'] || f.name.replace(/\.jar$/i, '');
+      const vendor = suite.properties['MIDlet-Vendor'] ?? '';
+      const existing = apps.find((a) => !a.builtin && a.name === name && a.vendor === vendor);
+      const entry: AppEntry = {
+        id: existing?.id ?? newId(),
+        name,
+        vendor,
+        version: suite.properties['MIDlet-Version'] ?? '',
+        size: jar.length,
+        icon: extractIcon(suite),
+        midlets: suite.midlets,
+        addedAt: existing?.addedAt ?? Date.now(),
+        lastPlayed: existing?.lastPlayed ?? 0,
+        settings: existing?.settings ?? { ...DEFAULT_SETTINGS },
+      };
+      await store.putWithJar(entry, { jar, jad });
+      apps = apps.filter((a) => a.id !== entry.id).concat(entry);
+      installed = entry;
+      toast(existing ? `Updated ${name} (saved data kept)` : `Installed ${name}`);
+    } catch (e) {
+      toast(`${f.name}: ${e instanceof Error ? e.message : e}`, 5000);
+    }
+  }
+  renderLibrary();
+  if (installed && jars.length === 1 && playerView.hidden) {
+    // one game added: start it right away, like J2ME-Loader does after installing
+    void play(installed);
+  }
+}
+
+for (const id of ['fileInput', 'fileInputFab']) {
+  $<HTMLInputElement>(id).addEventListener('change', (e) => {
+    const input = e.target as HTMLInputElement;
+    if (input.files?.length) void installFiles(input.files);
+    input.value = '';
+  });
+}
+
+let dragDepth = 0;
+document.addEventListener('dragenter', (e) => {
+  if (!playerView.hidden || !e.dataTransfer?.types.includes('Files')) return;
+  dragDepth++;
+  $('dropHint').hidden = false;
+});
+document.addEventListener('dragleave', () => { if (--dragDepth <= 0) { dragDepth = 0; $('dropHint').hidden = true; } });
+document.addEventListener('dragover', (e) => e.preventDefault());
+document.addEventListener('drop', (e) => {
   e.preventDefault();
-  audio.unlock();
-  emu.platform.keyDown(code);
-  keypadButton(code)?.classList.add('active');
+  dragDepth = 0;
+  $('dropHint').hidden = true;
+  if (e.dataTransfer?.files.length && playerView.hidden) void installFiles(e.dataTransfer.files);
 });
-window.addEventListener('keyup', (e) => {
-  const code = keyCodeFor(e);
-  if (code === undefined || !emu) return;
-  emu.platform.keyUp(code);
-  keypadButton(code)?.classList.remove('active');
-});
-window.addEventListener('blur', () => emu?.platform.releaseAllKeys());
 
-for (const btn of document.querySelectorAll<HTMLButtonElement>('.k[data-key]')) {
-  const code = Number(btn.dataset.key);
-  let delay: ReturnType<typeof setTimeout> | null = null;
-  let repeat: ReturnType<typeof setInterval> | null = null;
-  const down = (ev: PointerEvent) => {
-    ev.preventDefault();
-    btn.setPointerCapture(ev.pointerId);
-    audio.unlock();
-    emu?.platform.keyDown(code);
-    btn.classList.add('active');
-    // held key: the platform turns repeated keyDowns into keyRepeated events
-    delay = setTimeout(() => { repeat = setInterval(() => emu?.platform.keyDown(code), 90); }, 400);
-  };
-  const up = () => {
-    if (delay) { clearTimeout(delay); delay = null; }
-    if (repeat) { clearInterval(repeat); repeat = null; }
-    if (!btn.classList.contains('active')) return;
-    btn.classList.remove('active');
-    emu?.platform.keyUp(code);
-  };
-  btn.addEventListener('pointerdown', down);
-  btn.addEventListener('pointerup', up);
-  btn.addEventListener('pointercancel', up);
-  btn.addEventListener('contextmenu', (e) => e.preventDefault());
-}
+$('search').addEventListener('input', renderLibrary);
+$<HTMLSelectElement>('sort').addEventListener('change', () => {
+  try { localStorage.setItem('j2me4w:sort', $<HTMLSelectElement>('sort').value); } catch { /* ignore */ }
+  renderLibrary();
+});
 
-function canvasPoint(e: PointerEvent): [number, number] {
-  const r = canvas.getBoundingClientRect();
-  return [((e.clientX - r.left) / r.width) * canvas.width, ((e.clientY - r.top) / r.height) * canvas.height];
-}
-let pointerDown = false;
-canvas.addEventListener('pointerdown', (e) => {
-  if (!emu) return;
-  audio.unlock();
-  pointerDown = true;
-  canvas.setPointerCapture(e.pointerId);
-  const [x, y] = canvasPoint(e);
-  emu.platform.pointer('down', x, y);
+$('globalBtn').addEventListener('click', async () => {
+  const input = $<HTMLInputElement>('proxyInput');
+  input.value = global.proxy;
+  const r = await dialogResult($<HTMLDialogElement>('globalDialog'));
+  if (r === 'save') { global.proxy = input.value.trim(); saveGlobal(); }
 });
-canvas.addEventListener('pointermove', (e) => {
-  if (!emu || !pointerDown) return;
-  const [x, y] = canvasPoint(e);
-  emu.platform.pointer('move', x, y);
-});
-const pointerUp = (e: PointerEvent) => {
-  if (!emu || !pointerDown) return;
-  pointerDown = false;
-  const [x, y] = canvasPoint(e);
-  emu.platform.pointer('up', x, y);
+
+// ------------------------------------------------------------------ boot
+const DEMO: AppEntry = {
+  id: 'demo',
+  name: 'J2ME4W Demo',
+  vendor: 'j2me4w',
+  version: '1.0',
+  size: 0,
+  icon: null,
+  midlets: [],
+  addedAt: 0,
+  lastPlayed: 0,
+  settings: { ...DEFAULT_SETTINGS },
+  builtin: true,
 };
-canvas.addEventListener('pointerup', pointerUp);
-canvas.addEventListener('pointercancel', pointerUp);
 
-// drag & drop
-const wrap = $<HTMLDivElement>('screenWrap');
-for (const target of [document.body]) {
-  target.addEventListener('dragover', (e) => { e.preventDefault(); wrap.classList.add('dragging'); });
-  target.addEventListener('dragleave', () => wrap.classList.remove('dragging'));
-  target.addEventListener('drop', (e) => {
-    e.preventDefault();
-    wrap.classList.remove('dragging');
-    if (e.dataTransfer?.files.length) void openFiles(e.dataTransfer.files);
-  });
+async function boot() {
+  try { $<HTMLSelectElement>('sort').value = localStorage.getItem('j2me4w:sort') ?? 'recent'; } catch { /* ignore */ }
+  audio.setMuted(!!global.muted);
+  try {
+    apps = await store.list();
+  } catch (e) {
+    toast(`Storage unavailable: ${e}`, 5000);
+    apps = [];
+  }
+  if (!apps.some((a) => a.id === 'demo')) {
+    apps.push(DEMO);
+    void store.put(DEMO).catch(() => {});
+  }
+  renderLibrary();
+  history.replaceState({ view: 'library' }, '');
+  void runtime().catch((e) => toast(String(e), 5000));
 }
 
-// ------------------------------------------------------------------ controls
-$<HTMLInputElement>('file').addEventListener('change', (e) => {
-  const input = e.target as HTMLInputElement;
-  if (input.files?.length) void openFiles(input.files);
-  input.value = '';
-});
-$<HTMLButtonElement>('demo').addEventListener('click', () => { audio.unlock(); void runDemo(); });
-restartBtn.addEventListener('click', () => { if (suite) void start(suite, Number(midletSelect.value) || 0); });
-midletSelect.addEventListener('change', () => { if (suite) void start(suite, Number(midletSelect.value)); });
-
-function setMuted(m: boolean) {
-  audio.setMuted(m);
-  muteBtn.setAttribute('aria-pressed', String(m));
-  muteBtn.textContent = m ? 'Muted' : 'Sound on';
-}
-muteBtn.addEventListener('click', () => { setMuted(!audio.muted); saveSettings(); });
-proxyInput.addEventListener('change', saveSettings);
-
-for (const el of [sizeSel, crispBox]) {
-  el.addEventListener('change', () => {
-    saveSettings();
-    if (suite) void start(suite, Number(midletSelect.value) || 0);
-    else applyZoom();
-  });
-}
-zoomSel.addEventListener('change', () => { saveSettings(); applyZoom(); });
-window.addEventListener('resize', () => { if (zoomSel.value === 'auto') applyZoom(); });
-
-document.addEventListener('visibilitychange', () => {
-  if (document.hidden) emu?.platform.releaseAllKeys();
-});
-
-loadSettings();
-applyZoom();
-clearScreen();
-void getRuntime().catch((e) => log(String(e), true));
+void boot();

@@ -2,127 +2,304 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
   <title>J2ME4W</title>
   <meta name="description" content="Run J2ME (MIDP 2.0) games in the browser with a JVM written in TypeScript." />
+  <meta name="theme-color" content="#f3f1ec" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" content="#15171a" media="(prefers-color-scheme: dark)" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" href="icon.svg" type="image/svg+xml" />
 </head>
 <body>
-  <header class="topbar">
-    <div class="brand"><span class="logo">J2ME</span><span class="brand-4w">4W</span></div>
-    <div class="actions">
-      <label class="btn primary" title="Open a .jar (and optionally its .jad)">
-        <input id="file" type="file" accept=".jar,.jad" multiple hidden />
-        Open JAR
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></symbol>
+    <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" /></symbol>
+    <symbol id="i-back" viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6" /></symbol>
+    <symbol id="i-more" viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.2" /><circle cx="12" cy="12" r="1.2" /><circle cx="12" cy="19" r="1.2" /></symbol>
+    <symbol id="i-keypad" viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="2" /><path d="M7 10h.01M11 10h.01M15 10h.01M7 14h10" /></symbol>
+    <symbol id="i-sound" viewBox="0 0 24 24"><path d="M11 5L6 9H2v6h4l5 4V5z" /><path d="M15.5 8.5a5 5 0 0 1 0 7M19 5a10 10 0 0 1 0 14" /></symbol>
+    <symbol id="i-mute" viewBox="0 0 24 24"><path d="M11 5L6 9H2v6h4l5 4V5z" /><path d="M22 9l-6 6M16 9l6 6" /></symbol>
+    <symbol id="i-full" viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" /></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4l13 8-13 8z" /></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" /></symbol>
+    <symbol id="i-phone" viewBox="0 0 24 24"><rect x="6" y="2" width="12" height="20" rx="2.5" /><path d="M10 18h4M9 6h6v6H9z" /></symbol>
+  </svg>
+
+  <!-- ============================================================ library -->
+  <section id="libraryView" class="view library-view">
+    <header class="appbar">
+      <div class="brand"><span>J2ME</span><b>4W</b></div>
+      <label class="search">
+        <svg class="ic"><use href="#i-search" /></svg>
+        <input id="search" type="search" placeholder="Search" autocomplete="off" />
       </label>
-      <button id="demo" class="btn">Demo</button>
-      <button id="restart" class="btn" disabled>Restart</button>
-      <button id="mute" class="btn" aria-pressed="false" title="Mute audio">Sound on</button>
-    </div>
-  </header>
+      <select id="sort" class="sort" aria-label="Sort by">
+        <option value="recent">Recent</option>
+        <option value="name">Name</option>
+        <option value="vendor">Vendor</option>
+      </select>
+      <label class="btn primary add-btn">
+        <svg class="ic"><use href="#i-plus" /></svg><span>Add JAR</span>
+        <input id="fileInput" type="file" accept=".jar,.jad,application/java-archive" multiple hidden />
+      </label>
+      <button id="globalBtn" class="icon-btn" aria-label="Settings"><svg class="ic"><use href="#i-gear" /></svg></button>
+    </header>
 
-  <main class="layout">
-    <section class="device" aria-label="Phone">
-      <div class="screen-wrap" id="screenWrap">
+    <main class="library">
+      <ul id="appList" class="app-list" aria-label="Installed MIDlets"></ul>
+      <div id="emptyState" class="empty" hidden>
+        <svg class="empty-ic"><use href="#i-phone" /></svg>
+        <h2>No games yet</h2>
+        <p>Add a <b>.jar</b> (with its <b>.jad</b> if you have one), or drop it anywhere on this page. Files stay in your browser.</p>
+      </div>
+    </main>
+
+    <label class="fab" aria-label="Add JAR">
+      <svg class="ic"><use href="#i-plus" /></svg>
+      <input id="fileInputFab" type="file" accept=".jar,.jad,application/java-archive" multiple hidden />
+    </label>
+    <div id="dropHint" class="drop-hint" hidden><p>Drop .jar / .jad to install</p></div>
+  </section>
+
+  <!-- ============================================================ player -->
+  <section id="playerView" class="view player" hidden>
+    <header class="player-bar">
+      <button id="backBtn" class="icon-btn" aria-label="Back to library"><svg class="ic"><use href="#i-back" /></svg></button>
+      <img id="playerIcon" class="player-icon" src="icon.svg" alt="" />
+      <h1 id="playerTitle" class="player-title"></h1>
+      <span id="fps" class="fps" hidden></span>
+      <button id="kbBtn" class="icon-btn" aria-label="Toggle keypad" aria-pressed="false"><svg class="ic"><use href="#i-keypad" /></svg></button>
+      <button id="soundBtn" class="icon-btn" aria-label="Mute"><svg class="ic"><use href="#i-sound" /></svg></button>
+      <button id="fsBtn" class="icon-btn hide-narrow" aria-label="Fullscreen"><svg class="ic"><use href="#i-full" /></svg></button>
+      <button id="menuBtn" class="icon-btn" aria-label="Menu"><svg class="ic"><use href="#i-more" /></svg></button>
+    </header>
+    <div id="playerBody" class="player-body">
+      <div id="stage" class="stage">
         <canvas id="screen" width="240" height="320" tabindex="0" aria-label="Phone screen"></canvas>
-        <div id="overlay" class="overlay">
-          <p class="overlay-title">Drop a .jar file here</p>
-          <p class="overlay-sub">or use <b>Open JAR</b> · <b>Demo</b> runs a built-in MIDlet</p>
+        <div id="overlay" class="overlay" hidden>
+          <p class="overlay-title"></p>
+          <p class="overlay-sub"></p>
+          <div class="overlay-actions">
+            <button class="btn" data-action="library">Library</button>
+            <button class="btn primary" data-action="restart">Restart</button>
+          </div>
         </div>
       </div>
-      <div class="softbar">
-        <span id="softLeft"></span>
-        <span id="softRight"></span>
-      </div>
-      <div class="keypad" id="keypad">
-        <button data-key="-6" class="k soft">◤</button>
-        <button data-key="-1" class="k nav">▲</button>
-        <button data-key="-7" class="k soft">◥</button>
-        <button data-key="-3" class="k nav">◀</button>
-        <button data-key="-5" class="k fire">OK</button>
-        <button data-key="-4" class="k nav">▶</button>
-        <button data-key="-8" class="k soft small">C</button>
-        <button data-key="-2" class="k nav">▼</button>
-        <span></span>
-        <button data-key="49" class="k num">1</button>
-        <button data-key="50" class="k num">2<small>abc</small></button>
-        <button data-key="51" class="k num">3<small>def</small></button>
-        <button data-key="52" class="k num">4<small>ghi</small></button>
-        <button data-key="53" class="k num">5<small>jkl</small></button>
-        <button data-key="54" class="k num">6<small>mno</small></button>
-        <button data-key="55" class="k num">7<small>pqrs</small></button>
-        <button data-key="56" class="k num">8<small>tuv</small></button>
-        <button data-key="57" class="k num">9<small>wxyz</small></button>
-        <button data-key="42" class="k num">*</button>
-        <button data-key="48" class="k num">0</button>
-        <button data-key="35" class="k num">#</button>
-      </div>
-    </section>
+      <div id="keypad" class="keypad" hidden></div>
+    </div>
+    <button id="floatMenu" class="float-menu" aria-label="Menu"><svg class="ic"><use href="#i-more" /></svg></button>
 
-    <aside class="panel">
-      <div class="card">
-        <h2 id="appName">No MIDlet loaded</h2>
-        <p id="appInfo" class="muted">J2ME4W runs MIDP 2.0 / CLDC 1.1 applications on a Java virtual machine written in TypeScript. Nothing is uploaded: the JAR stays in your browser.</p>
-        <label class="field" id="midletField" hidden>MIDlet
-          <select id="midletSelect"></select>
-        </label>
-        <div class="row">
-          <label class="field">Screen
-            <select id="size">
-              <option value="128x160">128 × 160</option>
-              <option value="176x208">176 × 208 (S60)</option>
-              <option value="176x220">176 × 220</option>
-              <option value="240x320" selected>240 × 320</option>
-              <option value="320x240">320 × 240</option>
-              <option value="360x640">360 × 640</option>
-            </select>
-          </label>
-          <label class="field">Zoom
-            <select id="zoom">
-              <option value="auto" selected>Fit</option>
-              <option value="1">1×</option>
-              <option value="2">2×</option>
-              <option value="3">3×</option>
-            </select>
-          </label>
+    <div id="menuSheet" class="sheet-backdrop" hidden>
+      <div class="sheet" role="menu" aria-label="Game menu">
+        <div class="sheet-title" id="menuTitle"></div>
+        <button class="sheet-item" data-action="resume" role="menuitem">Resume</button>
+        <button class="sheet-item" data-action="keypad" role="menuitem">Show keypad</button>
+        <button class="sheet-item" data-action="screenshot" role="menuitem">Take screenshot</button>
+        <button class="sheet-item" data-action="fullscreen" role="menuitem">Fullscreen</button>
+        <button class="sheet-item" data-action="settings" role="menuitem">Settings…</button>
+        <button class="sheet-item" data-action="log" role="menuitem">Console</button>
+        <button class="sheet-item" data-action="restart" role="menuitem">Restart</button>
+        <button class="sheet-item danger" data-action="exit" role="menuitem">Exit to library</button>
+      </div>
+    </div>
+
+    <div id="consoleSheet" class="sheet-backdrop" hidden>
+      <div class="sheet console">
+        <div class="sheet-head">
+          <span>Console</span>
+          <span class="spacer"></span>
+          <button class="btn small" data-action="copy">Copy</button>
+          <button class="btn small" data-action="clear">Clear</button>
+          <button class="btn small" data-action="close">Close</button>
         </div>
-        <label class="check"><input type="checkbox" id="crisp" /> Pixel fonts (no anti-aliasing)</label>
-        <details class="advanced">
-          <summary>Network</summary>
-          <label class="field">Proxy URL
-            <input id="proxy" type="text" placeholder="/__j2me4w (this server)" spellcheck="false" autocomplete="off" />
-          </label>
-          <p class="hint">Online games reach their servers through this proxy (TCP over WebSocket and HTTP). It runs with <code>npm run dev</code> and <code>npm start</code>.</p>
-        </details>
-      </div>
-
-      <div class="card">
-        <h3>Keyboard</h3>
-        <dl class="keys">
-          <dt>Arrows</dt><dd>D-pad</dd>
-          <dt>Enter / Space</dt><dd>Fire (OK)</dd>
-          <dt>Q · W</dt><dd>Left · right soft key</dd>
-          <dt>0–9 · * · #</dt><dd>Number keys</dd>
-          <dt>Backspace</dt><dd>Clear</dd>
-        </dl>
-      </div>
-
-      <details class="card log" id="logBox">
-        <summary>Console <span id="logCount" class="badge" hidden></span></summary>
         <pre id="log"></pre>
-      </details>
-    </aside>
-  </main>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================ dialogs -->
+  <dialog id="appMenuDialog" class="dialog menu-dialog">
+    <form method="dialog">
+      <div class="menu-head"><img id="amIcon" src="icon.svg" alt="" /><div><b id="amName"></b><small id="amInfo"></small></div></div>
+      <button value="play" class="sheet-item">Play</button>
+      <button value="settings" class="sheet-item">Settings</button>
+      <button value="rename" class="sheet-item">Rename</button>
+      <button value="clear" class="sheet-item">Clear saved data</button>
+      <button value="delete" class="sheet-item danger">Delete</button>
+      <button value="cancel" class="sheet-item muted">Cancel</button>
+    </form>
+  </dialog>
+
+  <dialog id="settingsDialog" class="dialog settings-dialog">
+    <form method="dialog" id="settingsForm">
+      <header class="dialog-head">
+        <h2 id="settingsTitle">Settings</h2>
+        <button value="cancel" class="icon-btn" aria-label="Close" formnovalidate>✕</button>
+      </header>
+      <div class="settings-body">
+        <fieldset>
+          <legend>Screen</legend>
+          <label class="field">Resolution
+            <select name="preset">
+              <option value="128x128">128 × 128</option>
+              <option value="128x160">128 × 160</option>
+              <option value="176x208">176 × 208 (Nokia S60)</option>
+              <option value="176x220">176 × 220</option>
+              <option value="208x208">208 × 208</option>
+              <option value="240x320">240 × 320</option>
+              <option value="320x240">320 × 240 (landscape)</option>
+              <option value="240x400">240 × 400</option>
+              <option value="360x640">360 × 640 (Nokia S60v5)</option>
+              <option value="custom">Custom…</option>
+            </select>
+          </label>
+          <div class="row custom-size">
+            <label class="field">Width<input name="width" type="number" min="64" max="1024" required /></label>
+            <label class="field">Height<input name="height" type="number" min="64" max="1024" required /></label>
+          </div>
+          <label class="field">Scale
+            <select name="scale">
+              <option value="fit">Fit to window</option>
+              <option value="integer">Fit, whole multiples (sharpest)</option>
+              <option value="fill">Fill window (ignore aspect ratio)</option>
+              <option value="native">As is (1×)</option>
+            </select>
+          </label>
+          <div class="row">
+            <label class="field">Background<input name="background" type="color" /></label>
+            <label class="field">Orientation
+              <select name="orientation">
+                <option value="auto">Auto</option>
+                <option value="portrait">Portrait</option>
+                <option value="landscape">Landscape</option>
+              </select>
+            </label>
+          </div>
+          <label class="check"><input type="checkbox" name="filter" /> Smooth scaling (filter)</label>
+          <label class="check"><input type="checkbox" name="showFps" /> Show FPS</label>
+        </fieldset>
+
+        <fieldset>
+          <legend>Fonts</legend>
+          <div class="row three">
+            <label class="field">Small<input name="fontSmall" type="number" min="0" max="48" placeholder="auto" /></label>
+            <label class="field">Medium<input name="fontMedium" type="number" min="0" max="48" placeholder="auto" /></label>
+            <label class="field">Large<input name="fontLarge" type="number" min="0" max="48" placeholder="auto" /></label>
+          </div>
+          <label class="check"><input type="checkbox" name="fontAA" /> Anti-aliasing</label>
+        </fieldset>
+
+        <fieldset>
+          <legend>Keypad</legend>
+          <div class="row">
+            <label class="field">Show
+              <select name="keypad">
+                <option value="auto">Auto</option>
+                <option value="show">Always</option>
+                <option value="hide">Never</option>
+              </select>
+            </label>
+            <label class="field">Type
+              <select name="keypadType">
+                <option value="phone">Phone</option>
+                <option value="gamepad">Gamepad</option>
+              </select>
+            </label>
+          </div>
+          <p class="hint">Auto shows the keypad on touch screens. Phone: D-pad + 12 keys. Gamepad: 8-way joystick + Fire.</p>
+          <label class="field">Opacity when overlaid <output name="opacityOut"></output>
+            <input name="keypadOpacity" type="range" min="0.15" max="1" step="0.05" />
+          </label>
+          <label class="check"><input type="checkbox" name="haptics" /> Haptic feedback</label>
+        </fieldset>
+
+        <fieldset>
+          <legend>Other</legend>
+          <label class="check"><input type="checkbox" name="pauseWhenHidden" /> Pause when the tab is hidden</label>
+          <label class="field">System properties
+            <textarea name="sysProps" rows="3" spellcheck="false" placeholder="microedition.platform: Nokia6300&#10;microedition.locale: vi-VN"></textarea>
+          </label>
+        </fieldset>
+      </div>
+      <footer class="dialog-actions">
+        <button value="reset" class="btn" formnovalidate>Reset</button>
+        <span class="spacer"></span>
+        <button value="cancel" class="btn" formnovalidate>Cancel</button>
+        <button value="save" class="btn primary">Save</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <dialog id="globalDialog" class="dialog settings-dialog">
+    <form method="dialog">
+      <header class="dialog-head">
+        <h2>J2ME4W</h2>
+        <button value="cancel" class="icon-btn" aria-label="Close">✕</button>
+      </header>
+      <div class="settings-body">
+        <fieldset>
+          <legend>Network</legend>
+          <label class="field">Proxy URL
+            <input id="proxyInput" type="text" placeholder="/__j2me4w (this server)" spellcheck="false" autocomplete="off" />
+          </label>
+          <p class="hint">Online games reach their servers through this proxy (TCP over WebSocket, and HTTP). It runs with <code>npm run dev</code> and <code>npm start</code>.</p>
+        </fieldset>
+        <fieldset>
+          <legend>Keyboard</legend>
+          <dl class="keys">
+            <dt>Arrows</dt><dd>D-pad</dd>
+            <dt>Enter / Space</dt><dd>Fire (OK)</dd>
+            <dt>Q · W</dt><dd>Left · right soft key</dd>
+            <dt>0–9 · E · R</dt><dd>Digits · * · #</dd>
+            <dt>Backspace</dt><dd>Clear</dd>
+            <dt>Esc · M</dt><dd>Game menu</dd>
+            <dt>F11 · F</dt><dd>Fullscreen</dd>
+          </dl>
+        </fieldset>
+        <p class="hint">J2ME4W runs MIDP 2.0 / CLDC 1.1 applications on a Java virtual machine written in TypeScript. Games are stored only in this browser.</p>
+      </div>
+      <footer class="dialog-actions">
+        <span class="spacer"></span>
+        <button value="save" class="btn primary">Done</button>
+      </footer>
+    </form>
+  </dialog>
 
   <dialog id="textDialog" class="dialog">
     <form method="dialog">
-      <label id="textTitle" for="textInput">Enter text</label>
+      <label id="textTitle" for="textInput" class="dialog-label">Enter text</label>
       <textarea id="textInput" rows="3"></textarea>
-      <div class="dialog-actions">
+      <footer class="dialog-actions">
+        <span class="spacer"></span>
         <button value="cancel" class="btn">Cancel</button>
         <button value="ok" class="btn primary">OK</button>
-      </div>
+      </footer>
     </form>
   </dialog>
+
+  <dialog id="confirmDialog" class="dialog">
+    <form method="dialog">
+      <p id="confirmText" class="dialog-label"></p>
+      <input id="promptInput" type="text" hidden />
+      <footer class="dialog-actions">
+        <span class="spacer"></span>
+        <button value="cancel" class="btn">Cancel</button>
+        <button value="ok" id="confirmOk" class="btn primary">OK</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <dialog id="midletDialog" class="dialog menu-dialog">
+    <form method="dialog">
+      <p class="dialog-label">Select MIDlet</p>
+      <div id="midletChoices"></div>
+      <button value="cancel" class="sheet-item muted">Cancel</button>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
   <script type="module" src="/src/web/main.ts"></script>
 </body>

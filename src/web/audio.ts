@@ -225,6 +225,14 @@ export class WebAudioHost implements AudioHost {
     osc.stop(ctx.currentTime + durationMs / 1000);
   }
 
+  /** Pauses all audio output (page hidden) without touching player state. */
+  setSuspended(s: boolean): void {
+    const c = this.ctx;
+    if (!c) return;
+    if (s) void c.suspend();
+    else void c.resume();
+  }
+
   setMuted(m: boolean): void {
     this.muted = m;
     for (const c of this.clips.values()) if (c.gain) c.gain.gain.value = m ? 0 : c.volume / 100;
