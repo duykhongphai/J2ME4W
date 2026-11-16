@@ -6,7 +6,7 @@ import type { FontRenderer, Surface } from './surface';
 
 export const EV_KEY_PRESSED = 1, EV_KEY_RELEASED = 2, EV_KEY_REPEATED = 3;
 export const EV_POINTER_PRESSED = 4, EV_POINTER_RELEASED = 5, EV_POINTER_DRAGGED = 6;
-export const EV_REPAINT = 7, EV_SERIAL = 8, EV_PAUSE = 9, EV_RESUME = 10;
+export const EV_REPAINT = 7, EV_SERIAL = 8, EV_PAUSE = 9, EV_RESUME = 10, EV_FORCE_REPAINT = 11;
 
 /** Key codes (Nokia/Sony Ericsson convention). */
 export const KEY = {
@@ -80,6 +80,16 @@ export interface NetHost {
   http(req: HttpRequest): Promise<HttpResult>;
 }
 
+/** A request for text from TextBox / TextField. constraints are MIDP TextField constraints. */
+export interface TextRequest {
+  title: string | null;
+  text: string;
+  maxSize: number;
+  constraints: number;
+  /** Labels of the screen's commands, offered as buttons next to OK. */
+  commands: string[];
+}
+
 export interface PlatformHost {
   /** Networking (sockets and HTTP). Without it, Connector.open fails with IOException. */
   net?: NetHost;
@@ -87,7 +97,8 @@ export interface PlatformHost {
   present(surface: Surface): void;
   setSoftLabels?(left: string | null, right: string | null): void;
   vibrate?(ms: number): void;
-  editText?(title: string | null, text: string, maxSize: number, constraints: number): Promise<string | null>;
+  /** Text entry. Resolves to null when cancelled; `command` is -1 or the index of a picked command. */
+  editText?(req: TextRequest): Promise<{ text: string; command: number } | null>;
   openUrl?(url: string): void;
   onFatal?(message: string): void;
   /** Async decoder for non-PNG images (JPEG, GIF, BMP). */
@@ -118,6 +129,10 @@ export class Platform {
   private held = 0;
   private latched = 0;
   private heldKeys = new Set<number>();
+  /** Surfaces shown on screen (the Display back buffer and GameCanvas buffers). */
+  private displays = new Set<Surface>();
+  /** False while the session runs in the background: display drawing and presents are skipped. */
+  rendering = true;
 
   constructor(private vm: VM, opts: PlatformOptions) {
     this.width = opts.width;
@@ -192,6 +207,24 @@ export class Platform {
     const r = this.held | this.latched;
     this.latched = 0;
     return r;
+  }
+
+  /** Called for every surface that is presented. */
+  registerDisplay(s: Surface): void {
+    if (this.displays.has(s)) return;
+    this.displays.add(s);
+    s.skipDraw = !this.rendering;
+  }
+
+  /**
+   * Turns drawing of on-screen surfaces on or off. The game logic keeps running either way;
+   * turning drawing back on asks the MIDlet to repaint everything.
+   */
+  setRendering(on: boolean): void {
+    if (on === this.rendering) return;
+    this.rendering = on;
+    for (const s of this.displays) s.skipDraw = !on;
+    if (on) this.postEvent(EV_FORCE_REPAINT);
   }
 
   pause(): void { this.postEvent(EV_PAUSE); }

@@ -12,6 +12,7 @@ public class DemoMIDlet extends MIDlet implements CommandListener {
     final Command backCmd = new Command("Back", Command.BACK, 1);
     private final Command okCmd = new Command("OK", Command.OK, 1);
     private Form form;
+    private TextBox user, pass;
     private TextField nameField;
     private Gauge volume;
     private ChoiceGroup level;
@@ -19,7 +20,7 @@ public class DemoMIDlet extends MIDlet implements CommandListener {
     protected void startApp() {
         if (display != null) return;
         display = Display.getDisplay(this);
-        menu = new List("J2ME4W demo", List.IMPLICIT, new String[] { "Play Starfall", "Graphics test", "Form test", "About" }, null);
+        menu = new List("J2ME4W demo", List.IMPLICIT, new String[] { "Play Starfall", "Graphics test", "Form test", "Login test", "About" }, null);
         menu.addCommand(exitCmd);
         menu.setCommandListener(this);
         display.setCurrent(menu);
@@ -44,12 +45,33 @@ public class DemoMIDlet extends MIDlet implements CommandListener {
                 }
                 case 2: display.setCurrent(buildForm()); break;
                 case 3: {
+                    // like an online game's login: one full-screen TextBox per field
+                    user = new TextBox("Phone or email", "", 40, TextField.EMAILADDR);
+                    user.addCommand(okCmd);
+                    user.addCommand(backCmd);
+                    user.setCommandListener(this);
+                    display.setCurrent(user);
+                    break;
+                }
+                case 4: {
                     Alert a = new Alert("About", "J2ME4W runs MIDP 2.0 games on a JVM written in TypeScript.\n\nEverything you see here is Java bytecode interpreted in your browser.", null, AlertType.INFO);
                     a.setTimeout(Alert.FOREVER);
                     display.setCurrent(a, menu);
                     break;
                 }
             }
+        } else if (d == user && c == okCmd) {
+            pass = new TextBox("Password", "", 20, TextField.ANY | TextField.PASSWORD);
+            pass.addCommand(okCmd);
+            pass.addCommand(backCmd);
+            pass.setCommandListener(this);
+            display.setCurrent(pass);
+        } else if (d == pass && c == okCmd) {
+            System.out.println("login " + user.getString() + " / " + pass.getString().length() + " chars");
+            Alert a = new Alert("Logged in", "User: " + user.getString() + "\nPassword: " + pass.getString().length() + " characters",
+                null, AlertType.CONFIRMATION);
+            a.setTimeout(Alert.FOREVER);
+            display.setCurrent(a, menu);
         } else if (d == form && c == okCmd) {
             Alert a = new Alert("Saved", "Hello " + nameField.getString() + "!\nVolume " + volume.getValue()
                 + ", level " + level.getString(level.getSelectedIndex()), null, AlertType.CONFIRMATION);

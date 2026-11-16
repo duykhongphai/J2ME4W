@@ -31,6 +31,12 @@ public class Gauge extends Item {
         g.setColor(0x40A040);
         g.fillRect(x + 1, y + 1, fill + 1, 9);
     }
+    void itemPointer(int x, int y, int w) {
+        if (!interactive || max <= 0) return;
+        setValue((x * max + w / 2) / Math.max(1, w));
+        notifyStateChanged();
+    }
+
     boolean itemKey(int action, int keyCode) {
         if (!interactive) return false;
         if (action == Canvas.LEFT && value > 0) { setValue(value - 1); notifyStateChanged(); return true; }

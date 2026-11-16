@@ -39,12 +39,13 @@ public class TextField extends Item {
     }
     void activate() {
         if ((buf.constraints & UNEDITABLE) != 0) { super.activate(); return; }
-        String r = j2me4w.TextInput.edit(label, buf.text, buf.maxSize, buf.constraints);
-        if (r != null) {
-            buf.set(r);
-            repaint();
-            notifyStateChanged();
-        }
+        String[] result = new String[1];
+        if (j2me4w.TextInput.edit2(label, buf.text, buf.maxSize, buf.constraints, new String[0], result) == -2) return;
+        String r = result[0] == null ? "" : result[0];
+        if (r.length() > buf.maxSize) r = r.substring(0, buf.maxSize);
+        buf.set(r);
+        repaint();
+        notifyStateChanged();
     }
 }
 

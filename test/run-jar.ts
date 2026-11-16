@@ -31,7 +31,7 @@ const emu = new Emulator({
   host: {
     present: (s) => { frame = s.clone(); frames++; },
     setSoftLabels: (l, r) => console.log(`[soft] ${l} | ${r}`),
-    editText: async (_t, text) => text,
+    editText: async (r) => ({ text: r.text, command: -1 }),
     net: new NodeNetHost((m) => console.log(m)),
   },
   print: (s, l) => (s === 'err' ? console.error : console.log)(l),

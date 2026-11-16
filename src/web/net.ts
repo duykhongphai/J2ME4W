@@ -18,8 +18,11 @@ function fromBase64(s: string): Uint8Array {
 }
 
 export class ProxyNetHost implements NetHost {
-  /** `base` returns the proxy URL (absolute, or a path on this origin). */
-  constructor(private base: () => string, private log: (msg: string) => void = () => {}) {}
+  /**
+   * base: the bridge URL (absolute, or a path on this origin).
+   * via: optional upstream proxy for this session, e.g. "socks5://user:pass@host:1080" or "http://host:8080".
+   */
+  constructor(private base: () => string, private log: (msg: string) => void = () => {}, private via: () => string = () => '') {}
 
   private url(path: string, ws: boolean): string {
     const u = new URL((this.base() || DEFAULT_PROXY).replace(/\/$/, '') + path, document.baseURI);
@@ -32,7 +35,8 @@ export class ProxyNetHost implements NetHost {
       const target = `${host}:${port}`;
       let ws: WebSocket;
       try {
-        ws = new WebSocket(this.url(`/tcp?host=${encodeURIComponent(host)}&port=${port}`, true));
+        const via = this.via().trim();
+        ws = new WebSocket(this.url(`/tcp?host=${encodeURIComponent(host)}&port=${port}${via ? `&via=${encodeURIComponent(via)}` : ''}`, true));
       } catch (e) {
         reject(e);
         return;
@@ -70,7 +74,10 @@ export class ProxyNetHost implements NetHost {
       res = await fetch(this.url('/http', false), {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ method: req.method, url: req.url, headers: req.headers, body: req.body ? toBase64(req.body) : null }),
+        body: JSON.stringify({
+          method: req.method, url: req.url, headers: req.headers, body: req.body ? toBase64(req.body) : null,
+          via: this.via().trim() || undefined,
+        }),
       });
     } catch {
       throw new Error('network proxy unreachable');

@@ -37,4 +37,9 @@ public abstract class CustomItem extends Item {
         g.setClip(cx, cy, cwid, chei);
     }
     boolean itemKey(int action, int keyCode) { keyPressed(keyCode); return action != Canvas.UP && action != Canvas.DOWN; }
+    void itemPointer(int x, int y, int w) {
+        int cy = y - labelHeight(w);
+        pointerPressed(x, cy);
+        pointerReleased(x, cy);
+    }
 }

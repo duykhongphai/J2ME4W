@@ -51,6 +51,20 @@ public class ChoiceGroup extends Item implements Choice {
             y += m.rowHeight(i);
         }
     }
+    void itemPointer(int x, int y, int w) {
+        if (popup) { itemKey(Canvas.FIRE, -5); return; }
+        int ry = y - labelHeight(w);
+        for (int i = 0; i < m.size(); i++) {
+            int rh = m.rowHeight(i);
+            if (ry >= 0 && ry < rh) {
+                m.cursor = i;
+                itemKey(Canvas.FIRE, -5);
+                return;
+            }
+            ry -= rh;
+        }
+    }
+
     boolean itemKey(int action, int keyCode) {
         int n = m.size();
         if (n == 0) return false;

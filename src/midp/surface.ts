@@ -11,6 +11,11 @@ export class Surface {
   readonly px: Uint32Array;
   /** Incremented on every modification (used by hosts to skip redundant presents). */
   version = 0;
+  /**
+   * When set, drawing into this surface is skipped. Used for display surfaces of sessions running
+   * in the background, so hidden games only run their logic.
+   */
+  skipDraw = false;
   constructor(public readonly w: number, public readonly h: number, fill = 0xffffffff) {
     this.px = new Uint32Array(w * h);
     if (fill) this.px.fill(fill);
@@ -127,12 +132,14 @@ export class GraphicsState {
 
   // ---------------------------------------------------------------- primitives
   fillRect(x: number, y: number, w: number, h: number): void {
+    if (this.surf.skipDraw) return;
     if (w <= 0 || h <= 0) return;
     x += this.tx; y += this.ty;
     this.fillSpan(x, y, x + w, y + h);
   }
 
   drawRect(x: number, y: number, w: number, h: number): void {
+    if (this.surf.skipDraw) return;
     if (w < 0 || h < 0) return;
     if (this.stroke !== 0) {
       this.drawLine(x, y, x + w, y); this.drawLine(x + w, y, x + w, y + h);
@@ -148,6 +155,7 @@ export class GraphicsState {
   }
 
   drawLine(x1: number, y1: number, x2: number, y2: number): void {
+    if (this.surf.skipDraw) return;
     x1 += this.tx; y1 += this.ty; x2 += this.tx; y2 += this.ty;
     if (this.stroke === 0) {
       if (y1 === y2) { this.fillSpan(Math.min(x1, x2), y1, Math.max(x1, x2) + 1, y1 + 1); return; }
@@ -171,6 +179,7 @@ export class GraphicsState {
 
   /** Scanline polygon fill (even-odd, pixel centers). Points in translated coordinates. */
   fillPolygon(xs: number[], ys: number[]): void {
+    if (this.surf.skipDraw) return;
     const n = xs.length;
     if (n < 3) return;
     const X = xs.map((v) => v + this.tx), Y = ys.map((v) => v + this.ty);
@@ -219,6 +228,7 @@ export class GraphicsState {
   }
 
   fillArc(x: number, y: number, w: number, h: number, start: number, extent: number): void {
+    if (this.surf.skipDraw) return;
     if (w <= 0 || h <= 0 || extent === 0) return;
     x += this.tx; y += this.ty;
     const [bx0, by0, bx1, by1] = this.clipBox();
@@ -241,6 +251,7 @@ export class GraphicsState {
   }
 
   drawArc(x: number, y: number, w: number, h: number, start: number, extent: number): void {
+    if (this.surf.skipDraw) return;
     if (w < 0 || h < 0 || extent === 0) return;
     const rx = w / 2, ry = h / 2, cx = x + rx, cy = y + ry;
     const steps = Math.max(8, Math.ceil((Math.abs(extent) / 360) * Math.PI * (rx + ry)));
@@ -258,6 +269,7 @@ export class GraphicsState {
   }
 
   fillRoundRect(x: number, y: number, w: number, h: number, aw: number, ah: number): void {
+    if (this.surf.skipDraw) return;
     if (w <= 0 || h <= 0) return;
     aw = Math.min(Math.abs(aw), w); ah = Math.min(Math.abs(ah), h);
     if (aw === 0 || ah === 0) { this.fillRect(x, y, w, h); return; }
@@ -273,6 +285,7 @@ export class GraphicsState {
   }
 
   drawRoundRect(x: number, y: number, w: number, h: number, aw: number, ah: number): void {
+    if (this.surf.skipDraw) return;
     if (w < 0 || h < 0) return;
     aw = Math.min(Math.abs(aw), w); ah = Math.min(Math.abs(ah), h);
     if (aw === 0 || ah === 0) { this.drawRect(x, y, w, h); return; }
@@ -293,6 +306,7 @@ export class GraphicsState {
    */
   drawRegion(src: Surface, sx: number, sy: number, w: number, h: number, transform: number,
              x: number, y: number, anchor: number, exactCopy = false): void {
+    if (this.surf.skipDraw) return;
     if (w <= 0 || h <= 0) return;
     const swap = (transform & 4) !== 0;
     const W = swap ? h : w, H = swap ? w : h;
@@ -339,6 +353,7 @@ export class GraphicsState {
 
   /** rgb is Java ARGB ints. */
   drawRGB(rgb: Int32Array, offset: number, scan: number, x: number, y: number, w: number, h: number, alpha: boolean): void {
+    if (this.surf.skipDraw) return;
     if (w <= 0 || h <= 0) return;
     x += this.tx; y += this.ty;
     const [bx0, by0, bx1, by1] = this.clipBox();
@@ -357,6 +372,7 @@ export class GraphicsState {
   }
 
   copyArea(sx: number, sy: number, w: number, h: number, dx: number, dy: number, anchor: number): void {
+    if (this.surf.skipDraw) return;
     const tmp = new Surface(w, h, 0);
     const s = this.surf;
     const ox = sx + this.tx, oy = sy + this.ty;
@@ -371,6 +387,7 @@ export class GraphicsState {
 
   // ---------------------------------------------------------------- text
   drawString(str: string, x: number, y: number, anchor: number): void {
+    if (this.surf.skipDraw) return;
     const fr = this.fonts;
     const f = this.font;
     if (anchor === 0) anchor = TOP | LEFT;

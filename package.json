@@ -10,7 +10,7 @@
     "dev": "npm run build:rt && vite",
     "build": "npm run build:rt && tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
-    "test": "npm run build:rt && npm run build:tests && tsx test/run-node.ts",
+    "test": "npm run build:rt && npm run build:tests && tsx test/run-node.ts && node test/proxy-test.mjs",
     "start": "node scripts/serve.mjs"
   },
   "devDependencies": {

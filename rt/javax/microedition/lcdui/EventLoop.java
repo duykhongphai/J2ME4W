@@ -6,7 +6,7 @@ import javax.microedition.midlet.MIDlet;
 public final class EventLoop {
     static final int KEY_PRESSED = 1, KEY_RELEASED = 2, KEY_REPEATED = 3;
     static final int POINTER_PRESSED = 4, POINTER_RELEASED = 5, POINTER_DRAGGED = 6;
-    static final int REPAINT = 7, SERIAL = 8, PAUSE = 9, RESUME = 10;
+    static final int REPAINT = 7, SERIAL = 8, PAUSE = 9, RESUME = 10, FORCE_REPAINT = 11;
 
     private static MIDlet midlet;
     private EventLoop() {}
@@ -50,6 +50,10 @@ public final class EventLoop {
                 return;
             case REPAINT:
                 if (Display.repaintPending) Display.paintNow();
+                return;
+            case FORCE_REPAINT:
+                // the host skipped drawing while this session was hidden: redraw everything
+                Display.paintNow();
                 return;
             case SERIAL:
                 Runnable r = null;

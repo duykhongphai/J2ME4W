@@ -1,6 +1,18 @@
-// Minimal Standard MIDI File parser: extracts timed notes (seconds), honoring tempo changes.
+// Standard MIDI File parser: produces timed notes (seconds) with the channel state that applies to
+// each note (program, channel volume x expression, pitch bend at note-on), honoring tempo changes.
 
-export interface MidiNote { channel: number; note: number; velocity: number; start: number; end: number }
+export interface MidiNote {
+  channel: number;
+  note: number;
+  velocity: number;
+  program: number;
+  /** Channel volume x expression, 0..1. */
+  volume: number;
+  /** Pitch bend at note-on in semitones (+-2 range). */
+  bend: number;
+  start: number;
+  end: number;
+}
 
 export function parseMidi(data: Uint8Array): { notes: MidiNote[]; duration: number } {
   const dv = new DataView(data.buffer, data.byteOffset, data.byteLength);
@@ -13,8 +25,10 @@ export function parseMidi(data: Uint8Array): { notes: MidiNote[]; duration: numb
   if (division & 0x8000) throw new Error('SMPTE timing not supported');
   p = 8 + hlen;
 
-  interface Ev { tick: number; type: 'on' | 'off' | 'tempo'; ch: number; note: number; vel: number; tempo: number }
+  type Ev = { tick: number; order: number; kind: number; ch: number; a: number; b: number };
+  // kind: 0 tempo, 1 program, 2 controller, 3 bend, 4 note off, 5 note on
   const events: Ev[] = [];
+  let order = 0;
   for (let t = 0; t < ntracks && p + 8 <= data.length; t++) {
     const id = str4();
     const len = dv.getUint32(p + 4);
@@ -34,50 +48,78 @@ export function parseMidi(data: Uint8Array): { notes: MidiNote[]; duration: numb
     };
     while (p < end) {
       tick += vlq();
-      let c = data[p];
-      if (c & 0x80) { status = c; p++; } else c = status;
+      if (data[p] & 0x80) status = data[p++];
       const type = status & 0xf0, ch = status & 0x0f;
       if (status === 0xff) {
         const meta = data[p++];
         const l = vlq();
-        if (meta === 0x51 && l === 3) events.push({ tick, type: 'tempo', ch: 0, note: 0, vel: 0, tempo: (data[p] << 16) | (data[p + 1] << 8) | data[p + 2] });
+        if (meta === 0x51 && l === 3) {
+          events.push({ tick, order: order++, kind: 0, ch: 0, a: (data[p] << 16) | (data[p + 1] << 8) | data[p + 2], b: 0 });
+        }
         p += l;
         if (meta === 0x2f) break;
       } else if (status === 0xf0 || status === 0xf7) {
         p += vlq();
       } else if (type === 0x90 || type === 0x80) {
         const note = data[p++], vel = data[p++];
-        events.push({ tick, type: type === 0x90 && vel > 0 ? 'on' : 'off', ch, note, vel, tempo: 0 });
-      } else if (type === 0xc0 || type === 0xd0) {
+        events.push({ tick, order: order++, kind: type === 0x90 && vel > 0 ? 5 : 4, ch, a: note, b: vel });
+      } else if (type === 0xc0) {
+        events.push({ tick, order: order++, kind: 1, ch, a: data[p++], b: 0 });
+      } else if (type === 0xd0) {
         p += 1;
+      } else if (type === 0xb0) {
+        const c = data[p++], v = data[p++];
+        events.push({ tick, order: order++, kind: 2, ch, a: c, b: v });
+      } else if (type === 0xe0) {
+        const lsb = data[p++], msb = data[p++];
+        events.push({ tick, order: order++, kind: 3, ch, a: ((msb << 7) | lsb) - 8192, b: 0 });
       } else {
-        p += 2;
+        p += 2; // polyphonic aftertouch
       }
     }
     p = end;
   }
-  events.sort((a, b) => a.tick - b.tick || (a.type === 'tempo' ? -1 : 0));
+  // state changes before notes at the same tick, note-offs before note-ons
+  events.sort((x, y) => x.tick - y.tick || (x.kind - y.kind) || x.order - y.order);
+
+  const program = new Array(16).fill(0);
+  const vol = new Array(16).fill(100);
+  const expr = new Array(16).fill(127);
+  const bend = new Array(16).fill(0);
   let tempo = 500000;
   let lastTick = 0, time = 0;
-  const open = new Map<number, { start: number; vel: number }>();
+  const open = new Map<number, Omit<MidiNote, 'end'>>();
   const notes: MidiNote[] = [];
   for (const e of events) {
     time += ((e.tick - lastTick) * tempo) / division / 1e6;
     lastTick = e.tick;
-    if (e.type === 'tempo') { tempo = e.tempo; continue; }
-    const k = e.ch * 128 + e.note;
-    if (e.type === 'on') {
-      const prev = open.get(k);
-      if (prev) notes.push({ channel: e.ch, note: e.note, velocity: prev.vel, start: prev.start, end: time });
-      open.set(k, { start: time, vel: e.vel });
-    } else {
-      const o = open.get(k);
-      if (o) {
-        notes.push({ channel: e.ch, note: e.note, velocity: o.vel, start: o.start, end: time });
-        open.delete(k);
+    switch (e.kind) {
+      case 0: tempo = e.a; break;
+      case 1: program[e.ch] = e.a; break;
+      case 2:
+        if (e.a === 7) vol[e.ch] = e.b;
+        else if (e.a === 11) expr[e.ch] = e.b;
+        else if (e.a === 121) { vol[e.ch] = 100; expr[e.ch] = 127; bend[e.ch] = 0; }
+        else if (e.a === 120 || e.a === 123) {
+          for (const [k, o] of open) if (o.channel === e.ch) { notes.push({ ...o, end: time }); open.delete(k); }
+        }
+        break;
+      case 3: bend[e.ch] = (e.a / 8192) * 2; break;
+      case 4: case 5: {
+        const k = e.ch * 128 + e.a;
+        const o = open.get(k);
+        if (o) { notes.push({ ...o, end: time }); open.delete(k); }
+        if (e.kind === 5) {
+          open.set(k, {
+            channel: e.ch, note: e.a, velocity: e.b, program: program[e.ch],
+            volume: (vol[e.ch] / 127) * (expr[e.ch] / 127), bend: bend[e.ch], start: time,
+          });
+        }
+        break;
       }
     }
   }
-  for (const [k, o] of open) notes.push({ channel: k >> 7, note: k & 127, velocity: o.vel, start: o.start, end: time });
-  return { notes, duration: time };
+  for (const o of open.values()) notes.push({ ...o, end: Math.max(time, o.start + 0.25) });
+  notes.sort((a, b) => a.start - b.start);
+  return { notes, duration: Math.max(time, notes.length ? notes[notes.length - 1].end : 0) };
 }

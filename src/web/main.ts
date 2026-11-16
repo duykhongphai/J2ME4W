@@ -1,11 +1,14 @@
-// App shell: game library (IndexedDB), import, per-app settings, routing between library and player.
+// App shell: game library (IndexedDB), import, per-app settings, and the multi-tab workspace.
 import './style.css';
 import { loadSuite, unzip, type Suite } from '../emulator';
-import { WebAudioHost } from './audio';
-import { ProxyNetHost } from './net';
-import { coarsePointer, Player } from './player';
+import { AudioEngine } from './audio';
+import { bindingLabel, bindingsFor, MIDP_KEYS, readGamepads } from './controls';
+import { ITEM_NAMES } from './keypad';
+import { coarsePointer, Workspace } from './player';
+import type { TextRequest } from '../midp/platform';
+import type { Session } from './session';
 import {
-  AppStore, clearAppData, DEFAULT_SETTINGS, newId, type AppEntry, type AppSettings,
+  AppStore, clearAppData, DEFAULT_SETTINGS, loadTabPrefs, newId, saveTabPrefs, type AppEntry, type AppSettings,
 } from './store';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -13,15 +16,16 @@ const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getEleme
 // ------------------------------------------------------------------ globals
 const GLOBAL_KEY = 'j2me4w:global';
 const global = (() => {
-  try { return { proxy: '', muted: false, ...JSON.parse(localStorage.getItem(GLOBAL_KEY) ?? '{}') }; }
-  catch { return { proxy: '', muted: false }; }
+  const defaults = { proxy: '', muted: false, volume: 80, drawHidden: false, soundFocusedOnly: true };
+  try { return { ...defaults, ...JSON.parse(localStorage.getItem(GLOBAL_KEY) ?? '{}') }; }
+  catch { return defaults; }
 })();
 const saveGlobal = () => { try { localStorage.setItem(GLOBAL_KEY, JSON.stringify(global)); } catch { /* ignore */ } };
 
 const store = new AppStore();
-const audio = new WebAudioHost();
+const engine = new AudioEngine();
+engine.log = (m) => log(m);
 const logEl = $<HTMLPreElement>('log');
-const net = new ProxyNetHost(() => global.proxy, (m) => log(m));
 let apps: AppEntry[] = [];
 let rt: Map<string, Uint8Array> | null = null;
 
@@ -35,7 +39,7 @@ function log(line: string, err = false) {
   if (err) span.className = 'err';
   span.textContent = line + '\n';
   logEl.appendChild(span);
-  while (logEl.childNodes.length > 1500) logEl.removeChild(logEl.firstChild!);
+  while (logEl.childNodes.length > 2000) logEl.removeChild(logEl.firstChild!);
   if (!consoleSheet.hidden) logEl.scrollTop = logEl.scrollHeight;
   (err ? console.warn : console.log)(line);
 }
@@ -87,57 +91,256 @@ async function promptBox(text: string, value: string): Promise<string | null> {
   input.value = value;
   $('confirmOk').textContent = 'Save';
   $('confirmOk').style.background = '';
+  $('confirmOk').style.borderColor = '';
   setTimeout(() => input.select(), 0);
   return (await dialogResult(d)) === 'ok' ? input.value.trim() : null;
 }
 
-function editText(title: string | null, text: string, maxSize: number, constraints: number): Promise<string | null> {
-  const d = $<HTMLDialogElement>('textDialog');
-  const input = $<HTMLTextAreaElement>('textInput');
-  $('textTitle').textContent = title || 'Enter text';
-  input.value = text;
-  input.maxLength = maxSize;
-  const kind = constraints & 0xffff;
-  input.inputMode = kind === 2 ? 'numeric' : kind === 5 ? 'decimal' : kind === 3 ? 'tel' : kind === 1 ? 'email' : 'text';
-  player.releaseKeys();
-  const r = dialogResult(d).then((v) => (v === 'ok' ? input.value : null));
-  setTimeout(() => { input.focus(); input.select(); }, 0);
-  return r;
+/**
+ * Text entry for TextBox / TextField: a real input the user types into with the PC keyboard or the
+ * phone's own keyboard. The screen's commands appear as buttons; Enter picks the first positive one.
+ * Requests from several tabs are queued (one dialog at a time).
+ */
+let textQueue: Promise<unknown> = Promise.resolve();
+const NEGATIVE = '\u0001';
+function editText(req: TextRequest): Promise<{ text: string; command: number } | null> {
+  const run = async () => {
+    const d = $<HTMLDialogElement>('textDialog');
+    const line = $<HTMLInputElement>('textLine');
+    const area = $<HTMLTextAreaElement>('textArea');
+    const reveal = $<HTMLButtonElement>('textReveal');
+    const kind = req.constraints & 0xffff;
+    const password = (req.constraints & 0x10000) !== 0;
+    const multiline = kind === 0 && !password && req.maxSize > 120;
+    const input: HTMLInputElement | HTMLTextAreaElement = multiline ? area : line;
+    line.parentElement!.hidden = multiline;
+    area.hidden = !multiline;
+    $('textTitle').textContent = req.title || 'Enter text';
+    $('textTitle').setAttribute('for', input.id);
+    input.value = req.text;
+    input.maxLength = req.maxSize;
+    input.inputMode = kind === 2 ? 'numeric' : kind === 5 ? 'decimal' : kind === 3 ? 'tel' : kind === 1 ? 'email' : kind === 4 ? 'url' : 'text';
+    if (!multiline) line.type = password ? 'password' : kind === 1 ? 'email' : 'text';
+    reveal.hidden = !password;
+    reveal.setAttribute('aria-pressed', 'false');
+    $('textHint').textContent = kind === 2 ? 'Numbers only' : kind === 5 ? 'Decimal number' : kind === 3 ? 'Phone number' : '';
+    const count = () => { $('textCount').textContent = `${input.value.length} / ${req.maxSize}`; };
+    count();
+    input.oninput = () => {
+      if (kind === 2) input.value = input.value.replace(/[^\d-]/g, '');
+      else if (kind === 5) input.value = input.value.replace(/[^\d.,-]/g, '');
+      count();
+    };
+    // the game's commands, positive ones first; Enter triggers the first positive command
+    const box = $('textCommands');
+    box.innerHTML = '';
+    const cmds = req.commands.map((label, index) => ({ label: label.replace(NEGATIVE, ''), index, negative: label.startsWith(NEGATIVE) }));
+    const ordered = [...cmds.filter((c) => c.negative), ...cmds.filter((c) => !c.negative)];
+    for (const c of ordered) {
+      const b = document.createElement('button');
+      b.value = `cmd:${c.index}`;
+      b.className = c.negative ? 'btn' : 'btn primary';
+      b.textContent = c.label || 'OK';
+      box.appendChild(b);
+    }
+    const firstPositive = cmds.find((c) => !c.negative);
+    const ok = $<HTMLButtonElement>('textOk');
+    ok.hidden = !!firstPositive;
+    (input as HTMLInputElement).enterKeyHint = firstPositive ? 'go' : 'done';
+    input.onkeydown = (e: Event) => {
+      const ke = e as KeyboardEvent;
+      if (ke.key === 'Enter' && !(multiline && ke.shiftKey)) {
+        ke.preventDefault();
+        d.close(firstPositive ? `cmd:${firstPositive.index}` : 'ok');
+      }
+    };
+    ws.releaseKeys();
+    const r = dialogResult(d).then((v) => {
+      if (v === 'ok') return { text: input.value, command: -1 };
+      if (v.startsWith('cmd:')) return { text: input.value, command: Number(v.slice(4)) };
+      return null;
+    });
+    setTimeout(() => { input.focus(); input.select(); }, 0);
+    return r;
+  };
+  const p = textQueue.then(run, run);
+  textQueue = p.catch(() => {});
+  return p;
 }
 
-// ------------------------------------------------------------------ player
-const player = new Player({
+$('textReveal').addEventListener('click', () => {
+  const line = $<HTMLInputElement>('textLine');
+  const show = line.type === 'password';
+  line.type = show ? 'text' : 'password';
+  $('textReveal').setAttribute('aria-pressed', String(show));
+  $('textReveal').setAttribute('aria-label', show ? 'Hide password' : 'Show password');
+  line.focus();
+});
+
+// ------------------------------------------------------------------ workspace
+const ws = new Workspace({
   root: playerView,
   body: $('playerBody'),
   stage: $('stage'),
-  canvas: $<HTMLCanvasElement>('screen'),
   keypad: $('keypad'),
-  overlay: $('overlay'),
   fps: $('fps'),
 }, {
-  audio,
-  net,
+  engine,
+  bridge: () => global.proxy,
   log,
   editText,
-  onExit: (reason) => {
-    if (playerView.hidden) return;
-    player.showOverlay(reason === 'MIDlet exited' ? 'Game closed' : 'Stopped',
-      reason === 'MIDlet exited' ? '' : reason);
-  },
+  saveApp: (app) => { void store.put(app).catch(() => {}); },
+  changed: () => { renderTabs(); syncPlayerButtons(); updateRunningBar(); },
+  closeRequested: (s) => void closeTab(s),
 });
+if ((import.meta as any).env?.DEV) (window as any).__ws = ws; // inspection from tests
+ws.setDrawHidden(!!global.drawHidden);
+ws.setSoundFocusedOnly(global.soundFocusedOnly !== false);
 
+const editBar = $('editBar');
+const volumeInput = $<HTMLInputElement>('volume');
+let pickerMode = false;
 let exiting = false;
 
-function syncPlayerButtons() {
-  $('kbBtn').setAttribute('aria-pressed', String(player.keypadShown));
-  const snd = $('soundBtn');
-  snd.querySelector('use')!.setAttribute('href', audio.muted ? '#i-mute' : '#i-sound');
-  snd.setAttribute('aria-label', audio.muted ? 'Unmute' : 'Mute');
-  const kpItem = menuSheet.querySelector('[data-action="keypad"]')!;
-  kpItem.textContent = player.keypadShown ? 'Hide keypad' : 'Show keypad';
-  const fsItem = menuSheet.querySelector('[data-action="fullscreen"]')!;
-  fsItem.textContent = document.fullscreenElement ? 'Exit fullscreen' : 'Fullscreen';
+function setSheetLabel(action: string, text: string) {
+  const span = menuSheet.querySelector(`[data-action="${action}"] span`);
+  if (span) span.textContent = text;
 }
+
+function syncPlayerButtons() {
+  $('kbBtn').setAttribute('aria-pressed', String(ws.keypadShown));
+  const icon = engine.muted || global.volume === 0 ? '#i-mute' : '#i-sound';
+  for (const id of ['soundBtn', 'menuMute']) {
+    const b = $(id);
+    b.querySelector('use')!.setAttribute('href', icon);
+    b.setAttribute('aria-label', engine.muted ? 'Unmute' : 'Mute');
+  }
+  volumeInput.value = String(global.volume);
+  $<HTMLOutputElement>('volumeOut').value = engine.muted ? 'Muted' : `${global.volume}%`;
+  const multi = ws.sessions.length > 1;
+  const grid = $('gridBtn');
+  grid.setAttribute('aria-pressed', String(ws.view === 'grid'));
+  grid.querySelector('use')!.setAttribute('href', ws.view === 'grid' ? '#i-single' : '#i-grid');
+  grid.setAttribute('aria-label', ws.view === 'grid' ? 'Show one tab' : 'Show all tabs side by side');
+  $('syncBtn').setAttribute('aria-pressed', String(ws.syncInput));
+  grid.hidden = !multi;
+  $('syncBtn').hidden = !multi;
+  setSheetLabel('keypad', ws.keypadShown ? 'Hide keypad' : 'Show keypad');
+  setSheetLabel('fullscreen', document.fullscreenElement ? 'Exit fullscreen' : 'Fullscreen');
+  setSheetLabel('view', ws.view === 'grid' ? 'Show one tab at a time' : 'Show all tabs side by side');
+  setSheetLabel('sync', `Sync input: ${ws.syncInput ? 'on' : 'off'}`);
+  for (const a of ['view', 'sync']) (menuSheet.querySelector(`[data-action="${a}"]`) as HTMLElement).hidden = !multi;
+  $('menuTitle').textContent = ws.focused?.title ?? '';
+  playerView.classList.toggle('syncing', ws.syncInput && multi);
+}
+
+function setMuted(m: boolean) {
+  engine.setMuted(m);
+  global.muted = m;
+  saveGlobal();
+  syncPlayerButtons();
+}
+
+volumeInput.addEventListener('input', () => {
+  global.volume = Number(volumeInput.value);
+  engine.setVolume(global.volume / 100);
+  if (engine.muted && global.volume > 0) { engine.setMuted(false); global.muted = false; }
+  saveGlobal();
+  syncPlayerButtons();
+});
+
+// ---- tab strip (bar + menu sheet)
+function tabChip(s: Session, compact: boolean): HTMLElement {
+  const b = document.createElement('div');
+  b.className = 'tab-chip';
+  b.setAttribute('role', 'tab');
+  b.tabIndex = 0;
+  b.setAttribute('aria-selected', String(s === ws.focused));
+  b.dataset.status = s.status;
+  if (s.via) b.classList.add('proxied');
+  if (ws.syncInput && s.sync && ws.sessions.length > 1) b.classList.add('synced');
+  const img = document.createElement('img');
+  img.src = s.app.icon ?? 'icon.svg';
+  img.alt = '';
+  const label = document.createElement('span');
+  label.className = 'tab-label';
+  label.textContent = s.title;
+  b.title = `${s.title}${s.via ? ' — via proxy' : ''}${s.status !== 'running' ? ' — stopped' : ''}`;
+  b.append(img, label);
+  if (!compact || s === ws.focused) {
+    const x = document.createElement('button');
+    x.className = 'tab-x';
+    x.setAttribute('aria-label', `Close ${s.title}`);
+    x.innerHTML = '<svg class="ic"><use href="#i-close" /></svg>';
+    x.addEventListener('click', (e) => { e.stopPropagation(); void closeTab(s); });
+    b.appendChild(x);
+  }
+  b.addEventListener('click', () => { ws.focus(s); if (!menuSheet.hidden) menuSheet.hidden = true; });
+  b.addEventListener('keydown', (e) => { if (e.key === 'Enter') ws.focus(s); });
+  b.addEventListener('dblclick', () => void openTabDialog(s));
+  b.addEventListener('contextmenu', (e) => { e.preventDefault(); void openTabDialog(s); });
+  return b;
+}
+
+function renderTabs() {
+  const strip = $('tabStrip');
+  const sheet = $('sheetTabs');
+  strip.replaceChildren(...ws.sessions.map((s) => tabChip(s, true)));
+  sheet.replaceChildren(...ws.sessions.map((s) => tabChip(s, false)));
+  sheet.hidden = ws.sessions.length < 2;
+  strip.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+}
+
+function updateRunningBar() {
+  const n = ws.sessions.length;
+  const bar = $('runningBar');
+  bar.hidden = n === 0 || !playerView.hidden;
+  $('runningText').textContent = n === 1 ? `${ws.sessions[0].title} is running` : `${n} games running`;
+}
+
+// ---- views
+function showPlayer() {
+  libraryView.hidden = true;
+  playerView.hidden = false;
+  setPicker(false);
+  if (history.state?.view !== 'player') history.pushState({ view: 'player' }, '');
+  ws.setShown(true);
+  document.title = `${ws.focused?.title ?? 'Playing'} · J2ME4W`;
+  renderTabs();
+  syncPlayerButtons();
+  updateRunningBar();
+}
+
+function showLibrary(picker = false) {
+  stopEditing();
+  menuSheet.hidden = true;
+  consoleSheet.hidden = true;
+  ws.setShown(false);
+  void ws.exitFullscreen();
+  playerView.hidden = true;
+  libraryView.hidden = false;
+  setPicker(picker);
+  document.title = 'J2ME4W';
+  renderLibrary();
+  updateRunningBar();
+}
+
+/** Leaves the workspace for the library; games keep running in the background. */
+function toLibrary(picker = false) {
+  if (playerView.hidden) { setPicker(picker); return; }
+  if (history.state?.view === 'player') {
+    exiting = true;
+    history.back();
+  }
+  showLibrary(picker);
+}
+
+function setPicker(on: boolean) {
+  pickerMode = on;
+  $('pickerBar').hidden = !on;
+}
+$('pickerCancel').addEventListener('click', () => { setPicker(false); if (ws.sessions.length) showPlayer(); });
+$('runningBar').addEventListener('click', showPlayer);
 
 async function chooseMidlet(suite: Suite): Promise<number | null> {
   if (suite.midlets.length < 2) return 0;
@@ -154,7 +357,20 @@ async function chooseMidlet(suite: Suite): Promise<number | null> {
   return r === '' || r === 'cancel' ? null : Number(r);
 }
 
-async function play(app: AppEntry) {
+function freeSlot(app: AppEntry): number {
+  const used = new Set(ws.sessions.filter((s) => s.app.id === app.id).map((s) => s.slot));
+  let slot = 1;
+  while (used.has(slot)) slot++;
+  return slot;
+}
+
+/** Opens `app`: switches to its running tab, or starts it in a new tab. */
+async function launch(app: AppEntry, newTab = false) {
+  engine.unlock();
+  if (!newTab && !pickerMode) {
+    const running = ws.sessions.find((s) => s.app.id === app.id);
+    if (running) { ws.focus(running); showPlayer(); return; }
+  }
   let suite: Suite;
   try {
     let jar: Uint8Array, jad: string | undefined;
@@ -176,55 +392,110 @@ async function play(app: AppEntry) {
   const idx = await chooseMidlet(suite);
   if (idx === null) return;
   const boot = await runtime();
-
-  libraryView.hidden = true;
-  playerView.hidden = false;
-  menuSheet.hidden = true;
-  consoleSheet.hidden = true;
-  $('playerTitle').textContent = app.name;
-  $<HTMLImageElement>('playerIcon').src = app.icon ?? 'icon.svg';
-  $('menuTitle').textContent = app.name;
-  document.title = `${app.name} · J2ME4W`;
-  history.pushState({ view: 'player' }, '');
-  if (coarsePointer() && app.settings.orientation !== 'auto') void player.enterFullscreen();
-
-  await player.start(app, suite, boot, idx);
-  syncPlayerButtons();
+  const slot = freeSlot(app);
+  showPlayer();
+  if (coarsePointer() && app.settings.orientation !== 'auto' && ws.sessions.length === 0) void ws.enterFullscreen();
+  ws.open(app, suite, boot, idx, slot, loadTabPrefs(app.id, slot).via);
+  if (ws.sessions.length === 2 && !sessionStorage.getItem('j2me4w:tabsHint')) {
+    sessionStorage.setItem('j2me4w:tabsHint', '1');
+    toast(matchMedia('(max-width: 640px)').matches
+      ? 'Two games running. The menu can show both side by side or send your input to both.'
+      : 'Two games running. Use the grid button to see both, or the link button to control them together.', 5000);
+  }
+  document.title = `${ws.focused?.title ?? app.name} · J2ME4W`;
   app.lastPlayed = Date.now();
   void store.put(app).catch(() => {});
 }
 
-function showLibrary() {
-  player.stop();
-  void player.exitFullscreen();
-  playerView.hidden = true;
-  libraryView.hidden = false;
-  document.title = 'J2ME4W';
-  renderLibrary();
-}
-
-/** Leaves the player (also pops the history entry pushed by play()). */
-function exitToLibrary() {
-  if (playerView.hidden) return;
-  if (history.state?.view === 'player') {
-    exiting = true;
-    history.back();
-  }
-  showLibrary();
+async function closeTab(s: Session) {
+  if (s.running && !(await confirmBox(`Close “${s.title}”? The game stops and unsaved progress is lost.`, 'Close tab', true))) return;
+  ws.close(s);
+  if (!ws.sessions.length && !playerView.hidden) toLibrary();
 }
 
 function openMenu() {
   if (playerView.hidden) return;
-  player.releaseKeys();
+  if (ws.editing) stopEditing();
+  ws.releaseKeys();
   syncPlayerButtons();
+  renderTabs();
   menuSheet.hidden = false;
   (menuSheet.querySelector('.sheet-item') as HTMLElement).focus();
 }
 
+// ---- per-tab settings
+async function openTabDialog(s: Session) {
+  const d = $<HTMLDialogElement>('tabDialog');
+  $('tabDialogTitle').textContent = s.title;
+  const sel = $<HTMLSelectElement>('tabSlot');
+  sel.innerHTML = '';
+  const used = new Set(ws.sessions.filter((x) => x !== s && x.app.id === s.app.id).map((x) => x.slot));
+  for (let i = 1; i <= 9; i++) {
+    const o = new Option(i === 1 ? 'Slot 1 (main save)' : `Slot ${i}`, String(i), false, i === s.slot);
+    if (used.has(i)) { o.disabled = true; o.text += ' — open in another tab'; }
+    sel.add(o);
+  }
+  $<HTMLInputElement>('tabVia').value = s.via;
+  $<HTMLInputElement>('tabSync').checked = s.sync;
+  ws.releaseKeys();
+  if ((await dialogResult(d)) !== 'ok') return;
+  const slot = Number(sel.value);
+  const via = $<HTMLInputElement>('tabVia').value.trim();
+  if (via && !/^(socks5h?|socks|http):\/\/[^\s/]+$/i.test(via.replace(/\/$/, ''))) {
+    toast('Proxy must look like socks5://host:port or http://host:port', 4500);
+    return;
+  }
+  s.sync = $<HTMLInputElement>('tabSync').checked;
+  const restart = slot !== s.slot || via !== s.via;
+  s.slot = slot;
+  s.via = via;
+  saveTabPrefs(s.app.id, slot, { via });
+  s.updateLabel();
+  if (restart) {
+    toast(`Restarting ${s.title}`);
+    ws.restart(s);
+  }
+  renderTabs();
+}
+
+// ---- keypad layout editing
+ws.onEditSelection = (item) => {
+  $('editTarget').textContent = item ? ITEM_NAMES[item] ?? item : 'Select a key group';
+};
+
+function startEditing() {
+  ws.setEditing(true);
+  editBar.hidden = false;
+}
+
+function stopEditing() {
+  if (!ws.editing) return;
+  ws.setEditing(false);
+  editBar.hidden = true;
+  toast('Keypad layout saved');
+}
+
+editBar.addEventListener('click', (e) => {
+  const action = (e.target as HTMLElement).closest<HTMLElement>('[data-action]')?.dataset.action;
+  if (action === 'smaller') ws.resizeSelected(-0.1);
+  if (action === 'bigger') ws.resizeSelected(0.1);
+  if (action === 'reset') { ws.resetLayout(); toast('Default positions restored for this orientation'); }
+  if (action === 'done') stopEditing();
+});
+
 window.addEventListener('popstate', () => {
   if (exiting) { exiting = false; return; }
-  if (playerView.hidden) return;
-  // Android back button: first press opens the menu, a second press leaves the game
+  if (playerView.hidden) {
+    // back from the library returns to running games, if any
+    if (ws.sessions.length && history.state?.view === 'player') showPlayer();
+    return;
+  }
+  // Android back: leave edit mode, then open the menu; back on the menu goes to the library
+  if (ws.editing) {
+    history.pushState({ view: 'player' }, '');
+    stopEditing();
+    return;
+  }
   if (!menuSheet.hidden || !consoleSheet.hidden) {
     showLibrary();
     return;
@@ -233,20 +504,39 @@ window.addEventListener('popstate', () => {
   openMenu();
 });
 
+function toggleView() {
+  ws.setView(ws.view === 'grid' ? 'single' : 'grid');
+  syncPlayerButtons();
+}
+
+function toggleSync() {
+  ws.syncInput = !ws.syncInput;
+  toast(ws.syncInput ? 'Input goes to every synced tab' : 'Input goes to the selected tab only');
+  renderTabs();
+  syncPlayerButtons();
+}
+
 menuSheet.addEventListener('click', async (e) => {
   const t = e.target as HTMLElement;
   if (t === menuSheet) { menuSheet.hidden = true; return; }
   const action = t.closest<HTMLElement>('[data-action]')?.dataset.action;
   if (!action) return;
+  if (action === 'mute') { setMuted(!engine.muted); return; }
   menuSheet.hidden = true;
+  const s = ws.focused;
   switch (action) {
-    case 'keypad': player.toggleKeypad(); break;
-    case 'screenshot': player.screenshot(); toast('Screenshot saved'); break;
+    case 'newtab': toLibrary(true); break;
+    case 'view': toggleView(); break;
+    case 'sync': toggleSync(); break;
+    case 'tabsettings': if (s) await openTabDialog(s); break;
+    case 'keypad': ws.toggleKeypad(); break;
+    case 'edit': startEditing(); break;
+    case 'screenshot': s?.screenshot(); toast('Screenshot saved'); break;
     case 'fullscreen': await toggleFullscreen(); break;
-    case 'settings': if (player.app) await openSettings(player.app); break;
+    case 'settings': if (s) await openSettings(s.app); break;
     case 'log': consoleSheet.hidden = false; logEl.scrollTop = logEl.scrollHeight; break;
-    case 'restart': player.restart(); break;
-    case 'exit': exitToLibrary(); break;
+    case 'restart': ws.restart(); break;
+    case 'close': if (s) await closeTab(s); break;
   }
   syncPlayerButtons();
 });
@@ -259,32 +549,25 @@ consoleSheet.addEventListener('click', (e) => {
   if (action === 'copy') void navigator.clipboard?.writeText(logEl.textContent ?? '').then(() => toast('Copied'));
 });
 
-$('overlay').addEventListener('click', (e) => {
-  const action = (e.target as HTMLElement).closest<HTMLElement>('[data-action]')?.dataset.action;
-  if (action === 'restart') player.restart();
-  if (action === 'library') exitToLibrary();
-});
-
 async function toggleFullscreen() {
-  if (document.fullscreenElement) await player.exitFullscreen();
-  else await player.enterFullscreen();
+  if (document.fullscreenElement) await ws.exitFullscreen();
+  else await ws.enterFullscreen();
 }
 
-$('backBtn').addEventListener('click', exitToLibrary);
+$('backBtn').addEventListener('click', () => toLibrary());
+$('newTabBtn').addEventListener('click', () => toLibrary(true));
+$('gridBtn').addEventListener('click', toggleView);
+$('syncBtn').addEventListener('click', toggleSync);
 $('menuBtn').addEventListener('click', openMenu);
 $('floatMenu').addEventListener('click', openMenu);
 $('fsBtn').addEventListener('click', () => void toggleFullscreen());
-$('kbBtn').addEventListener('click', () => { player.toggleKeypad(); syncPlayerButtons(); });
-$('soundBtn').addEventListener('click', () => {
-  audio.setMuted(!audio.muted);
-  global.muted = audio.muted;
-  saveGlobal();
-  syncPlayerButtons();
-});
-document.addEventListener('fullscreenchange', () => { syncPlayerButtons(); player.layout(); });
+$('kbBtn').addEventListener('click', () => { ws.toggleKeypad(); if (!ws.keypadShown) stopEditing(); syncPlayerButtons(); });
+$('soundBtn').addEventListener('click', () => setMuted(!engine.muted));
+document.addEventListener('fullscreenchange', () => { syncPlayerButtons(); ws.layout(); });
 
 // hardware keyboard
 window.addEventListener('keydown', (e) => {
+  if (capture) return; // a binding is being recorded
   if (document.querySelector('dialog[open]')) return;
   const t = e.target as HTMLElement;
   if (t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA')) return;
@@ -293,25 +576,56 @@ window.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') { menuSheet.hidden = true; consoleSheet.hidden = true; e.preventDefault(); }
     return;
   }
-  if ((e.key === 'Escape' || e.code === 'KeyM') && !e.repeat) { e.preventDefault(); openMenu(); return; }
-  if (e.code === 'KeyF' && !e.repeat) { e.preventDefault(); void toggleFullscreen(); return; }
-  if (player.keyDown(e)) e.preventDefault();
+  if (ws.editing) {
+    if (e.key === 'Escape' || e.key === 'Enter') { e.preventDefault(); stopEditing(); }
+    if (e.key === '+' || e.key === '=') ws.resizeSelected(0.1);
+    if (e.key === '-') ws.resizeSelected(-0.1);
+    return;
+  }
+  // Alt+1..9 switches tabs, Alt+G toggles the grid, Alt+S toggles input sync
+  if (e.altKey && !e.ctrlKey && !e.metaKey) {
+    if (/^Digit[1-9]$/.test(e.code)) { e.preventDefault(); ws.focusIndex(Number(e.code.slice(5)) - 1); return; }
+    if (e.code === 'KeyG') { e.preventDefault(); toggleView(); return; }
+    if (e.code === 'KeyS') { e.preventDefault(); toggleSync(); return; }
+  }
+  if ((e.key === 'Escape' || e.code === 'KeyM') && !e.repeat && !e.altKey) { e.preventDefault(); openMenu(); return; }
+  if (e.code === 'KeyF' && !e.repeat && !e.altKey) { e.preventDefault(); void toggleFullscreen(); return; }
+  if (ws.keyDown(e)) e.preventDefault();
 });
-window.addEventListener('keyup', (e) => { if (!playerView.hidden && player.keyUp(e)) e.preventDefault(); });
-window.addEventListener('blur', () => player.releaseKeys());
+window.addEventListener('keyup', (e) => { if (!playerView.hidden && ws.keyUp(e)) e.preventDefault(); });
+window.addEventListener('blur', () => ws.releaseKeys());
 
 // ------------------------------------------------------------------ settings dialog
 const settingsDialog = $<HTMLDialogElement>('settingsDialog');
 const form = $<HTMLFormElement>('settingsForm');
 const field = <T extends HTMLElement = HTMLInputElement>(name: string) => form.elements.namedItem(name) as unknown as T;
+/** Settings being edited (bindings and layouts change here before Save). */
+let draft: AppSettings = { ...DEFAULT_SETTINGS };
+
+function selectTab(name: string) {
+  for (const t of form.querySelectorAll<HTMLElement>('.tab')) t.setAttribute('aria-selected', String(t.dataset.tab === name));
+  for (const p of form.querySelectorAll<HTMLElement>('.tab-panel')) p.hidden = p.dataset.panel !== name;
+  try { localStorage.setItem('j2me4w:settingsTab', name); } catch { /* ignore */ }
+}
+form.querySelector('.tabs')!.addEventListener('click', (e) => {
+  const tab = (e.target as HTMLElement).closest<HTMLElement>('.tab');
+  if (tab) selectTab(tab.dataset.tab!);
+});
+form.querySelector('.tabs')!.addEventListener('keydown', (e) => {
+  const k = (e as KeyboardEvent).key;
+  if (k !== 'ArrowLeft' && k !== 'ArrowRight') return;
+  const tabs = [...form.querySelectorAll<HTMLElement>('.tab')];
+  const i = tabs.findIndex((t) => t.getAttribute('aria-selected') === 'true');
+  const next = tabs[(i + (k === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length];
+  selectTab(next.dataset.tab!);
+  next.focus();
+});
 
 function fillSettings(s: AppSettings) {
-  const preset = `${s.width}x${s.height}`;
-  const sel = field<HTMLSelectElement>('preset');
-  sel.value = [...sel.options].some((o) => o.value === preset) ? preset : 'custom';
+  draft = { ...s, keyLayouts: { ...s.keyLayouts }, bindings: { ...s.bindings } };
   field('width').value = String(s.width);
   field('height').value = String(s.height);
-  (form.querySelector('.custom-size') as HTMLElement).hidden = sel.value !== 'custom';
+  syncSizeUI();
   field<HTMLSelectElement>('scale').value = s.scale;
   field('background').value = s.background;
   field<HTMLSelectElement>('orientation').value = s.orientation;
@@ -328,16 +642,15 @@ function fillSettings(s: AppSettings) {
   field('haptics').checked = s.haptics;
   field('pauseWhenHidden').checked = s.pauseWhenHidden;
   field<HTMLTextAreaElement>('sysProps').value = s.sysProps;
+  renderLayoutSummary();
+  renderBindings();
 }
 
 function readSettings(): AppSettings {
   const num = (n: string) => Math.max(0, Math.min(48, parseInt(field(n).value, 10) || 0));
-  const sel = field<HTMLSelectElement>('preset').value;
-  let [w, h] = sel === 'custom'
-    ? [parseInt(field('width').value, 10), parseInt(field('height').value, 10)]
-    : sel.split('x').map(Number);
-  w = Math.max(64, Math.min(1024, w || 240));
-  h = Math.max(64, Math.min(1024, h || 320));
+  // the width/height inputs always hold the chosen size (presets, "match device" and swap fill them)
+  const w = Math.max(64, Math.min(1024, parseInt(field('width').value, 10) || 240));
+  const h = Math.max(64, Math.min(1024, parseInt(field('height').value, 10) || 320));
   return {
     width: w,
     height: h,
@@ -356,18 +669,147 @@ function readSettings(): AppSettings {
     haptics: field('haptics').checked,
     pauseWhenHidden: field('pauseWhenHidden').checked,
     sysProps: field<HTMLTextAreaElement>('sysProps').value,
+    keyLayouts: draft.keyLayouts,
+    bindings: draft.bindings,
   };
+}
+
+function renderLayoutSummary() {
+  const n = Object.keys(draft.keyLayouts).length;
+  $('layoutSummary').textContent = n ? `Custom in ${n} layout${n > 1 ? 's' : ''}` : 'Default';
+  $<HTMLButtonElement>('resetLayouts').disabled = n === 0;
+}
+$('resetLayouts').addEventListener('click', () => { draft.keyLayouts = {}; renderLayoutSummary(); });
+
+// ---- controls (bindings) editor
+let capture: { code: number; cancel: () => void } | null = null;
+
+function renderBindings() {
+  const list = $('bindingList');
+  list.innerHTML = '';
+  for (const k of MIDP_KEYS) {
+    const row = document.createElement('div');
+    row.className = 'binding-row';
+    row.dataset.code = String(k.code);
+    const name = document.createElement('span');
+    name.className = 'binding-name';
+    name.textContent = k.name;
+    const chips = document.createElement('div');
+    chips.className = 'binding-chips';
+    for (const b of bindingsFor(draft.bindings, k.code)) {
+      const chip = document.createElement('span');
+      chip.className = 'chip';
+      chip.textContent = bindingLabel(b);
+      const x = document.createElement('button');
+      x.type = 'button';
+      x.className = 'chip-x';
+      x.setAttribute('aria-label', `Remove ${bindingLabel(b)} from ${k.name}`);
+      x.innerHTML = '<svg class="ic"><use href="#i-close" /></svg>';
+      x.addEventListener('click', () => setBindings(k.code, bindingsFor(draft.bindings, k.code).filter((v) => v !== b)));
+      chip.appendChild(x);
+      chips.appendChild(chip);
+    }
+    const add = document.createElement('button');
+    add.type = 'button';
+    add.className = 'chip add';
+    add.textContent = 'Add';
+    add.setAttribute('aria-label', `Add a key for ${k.name}`);
+    add.addEventListener('click', () => startCapture(k.code, add));
+    chips.appendChild(add);
+    row.append(name, chips);
+    list.appendChild(row);
+  }
+}
+
+function setBindings(code: number, list: string[]) {
+  draft.bindings = { ...draft.bindings, [String(code)]: list };
+  renderBindings();
+}
+
+function assign(code: number, binding: string) {
+  // a binding drives one phone key: take it away from any other key first
+  const next = { ...draft.bindings };
+  for (const k of MIDP_KEYS) {
+    if (k.code === code) continue;
+    const cur = bindingsFor(next, k.code);
+    if (cur.includes(binding)) next[String(k.code)] = cur.filter((v) => v !== binding);
+  }
+  const mine = bindingsFor(next, code);
+  if (!mine.includes(binding)) next[String(code)] = [...mine, binding];
+  draft.bindings = next;
+  renderBindings();
+}
+
+function startCapture(code: number, btn: HTMLElement) {
+  capture?.cancel();
+  btn.textContent = 'Press a key…';
+  btn.classList.add('listening');
+  const before = readGamepads();
+  let raf = 0;
+  const finish = (binding: string | null) => {
+    window.removeEventListener('keydown', onKey, true);
+    cancelAnimationFrame(raf);
+    capture = null;
+    if (binding) assign(code, binding); else renderBindings();
+  };
+  const onKey = (e: KeyboardEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.key === 'Escape') { finish(null); return; }
+    finish(`k:${e.code}`);
+  };
+  const poll = () => {
+    for (const b of readGamepads()) if (!before.has(b)) { finish(b); return; }
+    raf = requestAnimationFrame(poll);
+  };
+  window.addEventListener('keydown', onKey, true);
+  raf = requestAnimationFrame(poll);
+  capture = { code, cancel: () => finish(null) };
+}
+
+$('resetBindings').addEventListener('click', () => { capture?.cancel(); draft.bindings = {}; renderBindings(); });
+settingsDialog.addEventListener('close', () => capture?.cancel());
+
+/** A screen size with the same shape as this device's viewport, 240 px on the short side. */
+function deviceSize(): [number, number] {
+  const vw = window.innerWidth, vh = window.innerHeight;
+  const clamp = (v: number) => Math.max(240, Math.min(480, Math.round(v / 2) * 2));
+  return vh >= vw ? [240, clamp((240 * vh) / vw)] : [clamp((240 * vw) / vh), 240];
+}
+
+/** Selects the preset matching width x height (or Custom) and describes the size. */
+function syncSizeUI(fromPreset = false) {
+  const sel = field<HTMLSelectElement>('preset');
+  const w = parseInt(field('width').value, 10) || 0, h = parseInt(field('height').value, 10) || 0;
+  if (!fromPreset) {
+    const v = `${w}x${h}`;
+    sel.value = [...sel.options].some((o) => o.value === v) ? v : 'custom';
+  }
+  (form.querySelector('.custom-size') as HTMLElement).hidden = sel.value !== 'custom';
+  const shape = w > h ? 'Landscape' : w < h ? 'Portrait' : 'Square';
+  $('sizeHint').textContent = `${shape}, ${w} × ${h}. Changing the size restarts the game.`;
 }
 
 field<HTMLSelectElement>('preset').addEventListener('change', () => {
   const v = field<HTMLSelectElement>('preset').value;
-  (form.querySelector('.custom-size') as HTMLElement).hidden = v !== 'custom';
-  if (v !== 'custom') {
+  if (v === 'device') {
+    const [w, h] = deviceSize();
+    field('width').value = String(w);
+    field('height').value = String(h);
+  } else if (v !== 'custom') {
     const [w, h] = v.split('x');
     field('width').value = w;
     field('height').value = h;
   }
+  syncSizeUI(true);
 });
+$('swapSize').addEventListener('click', () => {
+  const w = field('width').value;
+  field('width').value = field('height').value;
+  field('height').value = w;
+  syncSizeUI();
+});
+for (const n of ['width', 'height']) field(n).addEventListener('input', () => syncSizeUI(true));
 field('keypadOpacity').addEventListener('input', () => {
   field<HTMLOutputElement>('opacityOut').value = `${Math.round(Number(field('keypadOpacity').value) * 100)}%`;
 });
@@ -375,12 +817,21 @@ field('keypadOpacity').addEventListener('input', () => {
 const NEEDS_RESTART: (keyof AppSettings)[] = ['width', 'height', 'fontSmall', 'fontMedium', 'fontLarge', 'fontAA', 'sysProps'];
 
 async function openSettings(app: AppEntry) {
+  stopEditing();
   $('settingsTitle').textContent = app.name;
   fillSettings(app.settings);
-  player.releaseKeys();
+  let tab = 'display';
+  try { tab = localStorage.getItem('j2me4w:settingsTab') ?? 'display'; } catch { /* ignore */ }
+  selectTab(tab);
+  ws.releaseKeys();
   for (;;) {
     const r = await dialogResult(settingsDialog);
-    if (r === 'reset') { fillSettings(DEFAULT_SETTINGS); continue; }
+    if (r === 'reset') {
+      if (await confirmBox('Reset every setting of this game, including controls and key positions?', 'Reset all', true)) {
+        fillSettings({ ...DEFAULT_SETTINGS, keyLayouts: {}, bindings: {} });
+      }
+      continue;
+    }
     if (r !== 'save') return;
     break;
   }
@@ -388,13 +839,13 @@ async function openSettings(app: AppEntry) {
   const restart = NEEDS_RESTART.some((k) => next[k] !== app.settings[k]);
   app.settings = next;
   await store.put(app);
-  if (player.app?.id === app.id && !playerView.hidden) {
+  const tabs = ws.sessions.filter((s) => s.app.id === app.id);
+  if (tabs.length) {
     if (restart) {
-      toast('Restarting with the new settings');
-      player.restart();
-    } else {
-      player.applySettings();
+      toast(tabs.length > 1 ? `Restarting ${tabs.length} tabs with the new settings` : 'Restarting with the new settings');
+      for (const s of tabs) ws.restart(s);
     }
+    ws.applySettings();
     syncPlayerButtons();
   } else {
     toast('Settings saved');
@@ -421,11 +872,12 @@ function renderLibrary() {
     });
   list.innerHTML = '';
   for (const app of shown) {
+    const running = ws.sessions.filter((s) => s.app.id === app.id).length;
     const li = document.createElement('li');
     li.className = 'app-card';
     li.tabIndex = 0;
     li.setAttribute('role', 'button');
-    li.setAttribute('aria-label', `Play ${app.name}`);
+    li.setAttribute('aria-label', pickerMode ? `Open ${app.name} in a new tab` : `Play ${app.name}`);
     const img = document.createElement('img');
     img.className = 'app-icon';
     img.alt = '';
@@ -437,7 +889,9 @@ function renderLibrary() {
     name.textContent = app.name;
     const sub = document.createElement('div');
     sub.className = 'app-sub';
-    sub.textContent = app.builtin ? 'Built-in demo' : [app.vendor, app.version && `v${app.version}`, formatSize(app.size)].filter(Boolean).join(' · ');
+    const info = app.builtin ? 'Built-in demo' : [app.vendor, app.version && `v${app.version}`, formatSize(app.size)].filter(Boolean).join(' · ');
+    sub.textContent = running ? `${running === 1 ? 'Running' : `${running} tabs running`} · ${info}` : info;
+    if (running) li.classList.add('running');
     meta.append(name, sub);
     const more = document.createElement('button');
     more.className = 'icon-btn';
@@ -445,8 +899,8 @@ function renderLibrary() {
     more.innerHTML = '<svg class="ic"><use href="#i-more" /></svg>';
     more.addEventListener('click', (e) => { e.stopPropagation(); void appMenu(app); });
     li.append(img, meta, more);
-    li.addEventListener('click', () => { audio.unlock(); void play(app); });
-    li.addEventListener('keydown', (e) => { if (e.key === 'Enter') void play(app); });
+    li.addEventListener('click', () => void launch(app));
+    li.addEventListener('keydown', (e) => { if (e.key === 'Enter') void launch(app); });
     li.addEventListener('contextmenu', (e) => { e.preventDefault(); void appMenu(app); });
     list.appendChild(li);
   }
@@ -463,24 +917,33 @@ async function appMenu(app: AppEntry) {
   for (const b of d.querySelectorAll<HTMLButtonElement>('[value="rename"],[value="delete"]')) b.hidden = !!app.builtin;
   const r = await dialogResult(d);
   switch (r) {
-    case 'play': void play(app); break;
+    case 'play': void launch(app); break;
+    case 'newtab': void launch(app, true); break;
     case 'settings': await openSettings(app); break;
     case 'rename': {
       const n = await promptBox('Rename', app.name);
-      if (n) { app.name = n; await store.put(app); renderLibrary(); }
+      if (n) {
+        app.name = n;
+        await store.put(app);
+        for (const s of ws.sessions) if (s.app === app) s.updateLabel();
+        renderLibrary();
+        renderTabs();
+      }
       break;
     }
     case 'clear':
-      if (await confirmBox(`Delete the saved data (records, high scores) of “${app.name}”?`, 'Clear data', true)) {
+      if (await confirmBox(`Delete the saved data (records, high scores) of “${app.name}”, in every slot?`, 'Clear data', true)) {
         toast(`Cleared ${clearAppData(app.id)} record store(s)`);
       }
       break;
     case 'delete':
       if (await confirmBox(`Delete “${app.name}” and its saved data?`, 'Delete', true)) {
+        for (const s of ws.sessions.filter((x) => x.app.id === app.id)) ws.close(s);
         await store.delete(app.id);
         clearAppData(app.id);
         apps = apps.filter((a) => a.id !== app.id);
         renderLibrary();
+        updateRunningBar();
         toast(`Deleted ${app.name}`);
       }
       break;
@@ -541,7 +1004,7 @@ async function installFiles(files: FileList | File[]) {
   renderLibrary();
   if (installed && jars.length === 1 && playerView.hidden) {
     // one game added: start it right away, like J2ME-Loader does after installing
-    void play(installed);
+    void launch(installed, pickerMode);
   }
 }
 
@@ -577,37 +1040,49 @@ $<HTMLSelectElement>('sort').addEventListener('change', () => {
 $('globalBtn').addEventListener('click', async () => {
   const input = $<HTMLInputElement>('proxyInput');
   input.value = global.proxy;
+  $<HTMLInputElement>('optDrawHidden').checked = !!global.drawHidden;
+  $<HTMLInputElement>('optSoundFocused').checked = global.soundFocusedOnly !== false;
   const r = await dialogResult($<HTMLDialogElement>('globalDialog'));
-  if (r === 'save') { global.proxy = input.value.trim(); saveGlobal(); }
+  if (r !== 'save') return;
+  global.proxy = input.value.trim();
+  global.drawHidden = $<HTMLInputElement>('optDrawHidden').checked;
+  global.soundFocusedOnly = $<HTMLInputElement>('optSoundFocused').checked;
+  saveGlobal();
+  ws.setDrawHidden(global.drawHidden);
+  ws.setSoundFocusedOnly(global.soundFocusedOnly);
+});
+
+window.addEventListener('beforeunload', (e) => {
+  if (ws.sessions.some((s) => s.running)) e.preventDefault();
 });
 
 // ------------------------------------------------------------------ boot
-const DEMO: AppEntry = {
-  id: 'demo',
-  name: 'J2ME4W Demo',
-  vendor: 'j2me4w',
-  version: '1.0',
-  size: 0,
-  icon: null,
-  midlets: [],
-  addedAt: 0,
-  lastPlayed: 0,
-  settings: { ...DEFAULT_SETTINGS },
-  builtin: true,
-};
-
 async function boot() {
   try { $<HTMLSelectElement>('sort').value = localStorage.getItem('j2me4w:sort') ?? 'recent'; } catch { /* ignore */ }
-  audio.setMuted(!!global.muted);
+  engine.setMuted(!!global.muted);
+  engine.setVolume(global.volume / 100);
   try {
     apps = await store.list();
   } catch (e) {
     toast(`Storage unavailable: ${e}`, 5000);
     apps = [];
   }
-  if (!apps.some((a) => a.id === 'demo')) {
-    apps.push(DEMO);
-    void store.put(DEMO).catch(() => {});
+  // the library no longer lists the built-in demo
+  for (const a of apps.filter((x) => x.builtin)) void store.delete(a.id).catch(() => {});
+  apps = apps.filter((a) => !a.builtin);
+  // the on-screen keypad is now on by default: move games still on the old "auto" default
+  if (!localStorage.getItem('j2me4w:migr:keypadShow2')) {
+    for (const a of apps) {
+      if (a.settings.keypad === 'auto' || a.settings.keypadOpacity < 0.6) {
+        a.settings = {
+          ...a.settings,
+          keypad: a.settings.keypad === 'auto' ? 'show' : a.settings.keypad,
+          keypadOpacity: Math.max(a.settings.keypadOpacity, 0.8),
+        };
+        void store.put(a).catch(() => {});
+      }
+    }
+    try { localStorage.setItem('j2me4w:migr:keypadShow2', '1'); } catch { /* ignore */ }
   }
   renderLibrary();
   history.replaceState({ view: 'library' }, '');

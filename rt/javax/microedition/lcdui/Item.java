@@ -70,6 +70,9 @@ public abstract class Item {
     boolean focusable() { return !commands.isEmpty(); }
     /** Returns true when the item consumed the key. */
     boolean itemKey(int action, int keyCode) { return false; }
+    /** Tap at (x, y) relative to the item's top-left (label included). */
+    void itemPointer(int x, int y, int w) { activate(); }
+
     void activate() {
         if (defaultCommand != null && itemListener != null) itemListener.commandAction(defaultCommand, this);
     }

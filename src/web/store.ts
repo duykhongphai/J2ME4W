@@ -26,7 +26,14 @@ export interface AppSettings {
   pauseWhenHidden: boolean;
   /** "key: value" lines, e.g. "microedition.platform: Nokia6300". */
   sysProps: string;
+  /** Custom on-screen key positions, keyed by "<keypadType>-<portrait|landscape>". */
+  keyLayouts: Record<string, Record<string, KeyItemPos>>;
+  /** Hardware bindings per MIDP key code ("k:<KeyboardEvent.code>", "p:<pad button>", "a:<axis>±"). */
+  bindings: Record<string, string[]>;
 }
+
+/** Centre of an on-screen key group as a fraction of the keypad area, plus a size factor. */
+export interface KeyItemPos { x: number; y: number; s: number }
 
 export const DEFAULT_SETTINGS: AppSettings = {
   width: 240,
@@ -40,12 +47,14 @@ export const DEFAULT_SETTINGS: AppSettings = {
   fontMedium: 0,
   fontLarge: 0,
   fontAA: true,
-  keypad: 'auto',
+  keypad: 'show',
   keypadType: 'phone',
-  keypadOpacity: 0.55,
+  keypadOpacity: 0.8,
   haptics: true,
   pauseWhenHidden: true,
   sysProps: '',
+  keyLayouts: {},
+  bindings: {},
 };
 
 export interface AppEntry {
@@ -130,15 +139,18 @@ export class AppStore {
   }
 }
 
-/** localStorage prefix holding an app's RecordStores. */
-export const rmsPrefix = (id: string) => `j2me4w:rms:${id}:`;
+/**
+ * localStorage prefix holding an app's RecordStores. Slot 1 is the app's main save data; other slots
+ * let several tabs of the same game keep separate saves (one account per tab, for example).
+ */
+export const rmsPrefix = (id: string, slot = 1) => (slot <= 1 ? `j2me4w:rms:${id}:` : `j2me4w:rms:${id}@${slot}:`);
 
+/** Deletes the RecordStores of every slot of an app. Returns the number of stores removed. */
 export function clearAppData(id: string): number {
-  const prefix = rmsPrefix(id);
   const keys: string[] = [];
   for (let i = 0; i < localStorage.length; i++) {
     const k = localStorage.key(i)!;
-    if (k.startsWith(prefix)) keys.push(k);
+    if (k.startsWith(`j2me4w:rms:${id}:`) || k.startsWith(`j2me4w:rms:${id}@`)) keys.push(k);
   }
   keys.forEach((k) => localStorage.removeItem(k));
   return keys.length;
@@ -155,4 +167,13 @@ export function parseSysProps(text: string): Record<string, string> {
 
 export function newId(): string {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+}
+
+/** Per app + data slot preferences of a tab (upstream proxy). */
+export interface TabPrefs { via: string }
+export function loadTabPrefs(appId: string, slot: number): TabPrefs {
+  try { return { via: '', ...JSON.parse(localStorage.getItem(`j2me4w:tab:${appId}:${slot}`) ?? '{}') }; } catch { return { via: '' }; }
+}
+export function saveTabPrefs(appId: string, slot: number, p: TabPrefs): void {
+  try { localStorage.setItem(`j2me4w:tab:${appId}:${slot}`, JSON.stringify(p)); } catch { /* ignore */ }
 }

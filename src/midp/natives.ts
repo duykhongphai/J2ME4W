@@ -127,8 +127,18 @@ export function registerMidpNatives(vm: VM, p: Platform): void {
   vm.registerNatives(`${LCDUI}/Display`, {
     'width0()I': () => p.width,
     'height0()I': () => p.height,
-    [`screen0()L${LCDUI}/Image;`]: () => (screenImage ??= makeImage(new Surface(p.width, p.height, 0xffffffff), true)),
-    [`present0(L${LCDUI}/Image;)V`]: (_t, [im]) => p.host.present(img(im).surf),
+    [`screen0()L${LCDUI}/Image;`]: () => {
+      if (!screenImage) {
+        screenImage = makeImage(new Surface(p.width, p.height, 0xffffffff), true);
+        p.registerDisplay(img(screenImage).surf);
+      }
+      return screenImage;
+    },
+    [`present0(L${LCDUI}/Image;)V`]: (_t, [im]) => {
+      const surf = img(im).surf;
+      p.registerDisplay(surf);
+      if (p.rendering) p.host.present(surf);
+    },
     'postEvent0(III)V': (_t, [type, a, c]) => p.postEvent(type, a, c),
     'waitEvent0([I)V': (t, [arr]) => (p.takeEvent(t, arr) ? undefined : SUSPEND),
     'vibrate0(I)V': (_t, [ms]) => p.host.vibrate?.(ms),
@@ -155,12 +165,27 @@ export function registerMidpNatives(vm: VM, p: Platform): void {
   vm.registerNatives('j2me4w/TextInput', {
     'edit(Ljava/lang/String;Ljava/lang/String;II)Ljava/lang/String;': (t, [title, text, max, constraints]) => {
       if (!p.host.editText) return text;
-      p.host.editText(vm.jstr(title), S(text), max, constraints).then(
-        (r) => vm.resume(t, r == null ? null : vm.str(r.slice(0, max))),
+      p.host.editText({ title: vm.jstr(title), text: S(text), maxSize: max, constraints, commands: [] }).then(
+        (r) => vm.resume(t, r == null ? null : vm.str(r.text.slice(0, max))),
         () => vm.resume(t, null),
       );
       return SUSPEND;
     },
+    'edit2(Ljava/lang/String;Ljava/lang/String;II[Ljava/lang/String;[Ljava/lang/String;)I':
+      (t, [title, text, max, constraints, commands, result]) => {
+        const out = result.a as (JObject | null)[];
+        if (!p.host.editText) { out[0] = text; return -1; }
+        const cmds = (commands.a as (JObject | null)[]).map((c) => vm.jstr(c) ?? '');
+        p.host.editText({ title: vm.jstr(title), text: S(text), maxSize: max, constraints, commands: cmds }).then(
+          (r) => {
+            if (r == null) { vm.resume(t, -2); return; }
+            out[0] = vm.str(r.text.slice(0, max));
+            vm.resume(t, r.command);
+          },
+          () => vm.resume(t, -2),
+        );
+        return SUSPEND;
+      },
   });
 
   // ---------------------------------------------------------------- vendor graphics helpers

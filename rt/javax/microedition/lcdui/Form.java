@@ -131,4 +131,27 @@ public class Form extends Screen {
         if (action == Canvas.FIRE && f != null) { f.activate(); return true; }
         return false;
     }
+
+    /** Mouse / touch: a tap selects the item under it and acts on it (opens text fields, picks choices...). */
+    void pointerEvent0(int type, int x, int y) {
+        if (type != EventLoop.POINTER_RELEASED) return;
+        int top = title != null ? titleFont().getHeight() + 4 : 0;
+        int iw = getWidth() - 8;
+        int yy = top + 2 - scroll;
+        for (int i = 0; i < items.size(); i++) {
+            Item it = (Item) items.elementAt(i);
+            int ih = it.height(iw);
+            if (y >= yy && y < yy + ih + 4) {
+                if (it.focusable() && focus != i) {
+                    focus = i;
+                    Display.commandsChanged(this);
+                }
+                repaintIfShown();
+                if (it.focusable()) it.itemPointer(x - 4, y - yy, iw);
+                repaintIfShown();
+                return;
+            }
+            yy += ih + 4;
+        }
+    }
 }

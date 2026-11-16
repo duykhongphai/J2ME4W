@@ -78,7 +78,10 @@ public class Display {
         }
         throw new IllegalArgumentException();
     }
-    public void callSerially(Runnable r) {
+    public void callSerially(Runnable r) { runLater(r); }
+
+    /** Runs r on the event thread after the current event. */
+    static void runLater(Runnable r) {
         synchronized (serialQueue) { serialQueue.addElement(r); }
         postEvent0(EventLoop.SERIAL, 0, 0);
     }

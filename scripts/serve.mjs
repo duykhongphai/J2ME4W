@@ -19,7 +19,9 @@ if (!fs.existsSync(path.join(root, 'index.html'))) {
   process.exit(1);
 }
 
-const proxy = createProxy();
+// a loopback-bound server only serves this machine, so local upstream proxies are allowed
+const loopback = host === '127.0.0.1' || host === 'localhost' || host === '::1';
+const proxy = createProxy({ allowPrivateProxy: loopback || undefined });
 const server = http.createServer((req, res) => {
   if (proxy.handleHttp(req, res)) return;
   const url = new URL(req.url, 'http://x');

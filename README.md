@@ -17,7 +17,7 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:5173, then open the built-in demo or press **Add JAR** (you can also drop a `.jar`, with its
+Open http://localhost:5173, then press **Add JAR** (you can also drop a `.jar`, with its
 `.jad` if you have one, onto the page).
 
 ```bash
@@ -39,8 +39,34 @@ npm start         # serve dist/ + the network proxy on http://127.0.0.1:8080
   sides in landscape. The D-pad follows a sliding finger; the gamepad layout has an 8-way joystick.
   The Android back button opens the game menu, a second press returns to the library. Add the page to
   the home screen to run it as an app.
-- **PC keyboard**: arrows = D-pad, Enter/Space = fire, Q / W = left / right soft key, 0-9 = digits,
-  E / R = * / #, Backspace = clear, Esc or M = game menu, F = fullscreen.
+- **Keypad layout editor**: in the game menu, *Edit keypad layout* lets you drag each key group
+  (D-pad, number keys, soft keys, Fire) and make it bigger or smaller. Positions are saved per game,
+  per keypad style and per orientation.
+- **Controls**: Settings → Controls binds keyboard keys and gamepad buttons (Gamepad API: D-pad,
+  sticks, A/B/X/Y, shoulders) to each phone key. Defaults: arrows = D-pad, Enter/Space or pad A =
+  fire, Q / W or LB / RB = soft keys, 0-9 = digits, E / R = * / #, Backspace = clear. Esc or M opens
+  the game menu, F toggles fullscreen.
+- **Sound**: WAV/MP3/OGG through WebAudio, MIDI through a built-in General MIDI synth (instrument
+  families, envelopes, synthesized drums), tones and tone sequences. Volume is in the game menu.
+
+### Several games at once (tabs)
+
+- **Tabs**: the **+** in the game bar (or *Open in a new tab* in a game's ⋮ menu) starts another game,
+  or another copy of the same one, next to the running ones. Each tab is a separate virtual machine.
+  Going back to the library leaves every tab running; the bar at the top of the library returns to them.
+- **Grid view**: shows every tab side by side (grid button, *Show all tabs* in the menu, or Alt+G).
+  Click a screen to select it; Alt+1…9 selects a tab.
+- **Input sync**: with the link button (or Alt+S) on, keys, the on-screen keypad, gamepads and taps go
+  to every synced tab at once. *Tab settings* (double-click a tab) can leave a tab out.
+- **Save slots**: every copy of a game uses its own save slot, so tabs keep separate RecordStores
+  (for example one account per tab). Slot 1 is the game's main save.
+- **Proxy per tab**: *Tab settings* takes an upstream proxy (`socks5://user:pass@host:port`,
+  `socks5h://…`, or `http://host:port` for HTTP CONNECT). That tab's sockets and HTTP requests leave the
+  bridge through it. It is remembered per game and save slot.
+- **Background tabs skip drawing**: tabs that are not on screen keep running (online games stay
+  connected) but skip every drawing operation and frame copy, and redraw fully when shown again.
+  App settings (gear in the library) can keep drawing hidden tabs, and choose whether only the selected
+  tab plays sound.
 
 ## Online games (network proxy)
 
@@ -54,7 +80,9 @@ The proxy runs automatically with `npm run dev` and `npm start`. A static host (
 no proxy: run `npm start` somewhere and put its URL in **Network → Proxy URL**. By default the proxy
 refuses private and loopback addresses; set `J2ME4W_ALLOW_PRIVATE=1` to allow them (for example a game
 server on your LAN). Do not expose the proxy publicly without access control: anyone who can reach it
-can use it to open connections.
+can use it to open connections. Upstream proxies set per tab may be on a private address (a local
+SOCKS client on 127.0.0.1, say) with `npm run dev`, with `npm start` bound to loopback, or with
+`J2ME4W_ALLOW_PRIVATE_PROXY=1`.
 
 To debug a JAR without a browser: `npx tsx test/run-jar.ts game.jar 20 shot.png 6000:-6` runs it for
 20 s with real networking, presses the left soft key after 6 s and saves the last frame.
@@ -93,7 +121,7 @@ To debug a JAR without a browser: `npx tsx test/run-jar.ts game.jar 20 shot.png 
 | High-level UI (`List`, `Form`, items, `Alert`, `TextBox`) | Basic rendering, keypad navigation, text entry dialog |
 | Commands / soft keys | Yes, with an options menu when there are more than two |
 | RMS (`RecordStore`) | Yes, persisted in `localStorage` per MIDlet suite |
-| MMAPI (`Player`) | WAV/MP3/OGG via WebAudio, tones and tone sequences, MIDI with a simple synth |
+| MMAPI (`Player`) | WAV/MP3/OGG via WebAudio, MIDI through a General MIDI synth, tones and tone sequences (AMR is silent) |
 | Nokia UI API (`FullCanvas`, `DirectGraphics`, `DeviceControl`) | Yes |
 | Networking (`socket://`, `http(s)://`) | Yes, through the bundled proxy (see below) |
 | JSR-184 (M3G 3D), JSR-75 (files), Bluetooth, other vendor APIs | Not yet |
@@ -116,6 +144,6 @@ src/vm/             class parser, interpreter, VM, java.lang natives
 src/midp/           platform, software renderer, PNG decoder, fonts, MIDP natives
 src/web/            browser host: UI, keyboard/touch, WebAudio, MIDI
 src/emulator.ts     host-independent entry point (load a JAR, start a MIDlet)
-examples/demo/      the built-in demo MIDlet (public/demo.jar)
+examples/demo/      a demo MIDlet used for testing (public/demo.jar, not listed in the app)
 test/               VM and MIDlet tests
 ```

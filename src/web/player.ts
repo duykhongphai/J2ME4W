@@ -1,394 +1,413 @@
-// The in-game view: runs one MIDlet, scales its screen into the stage, drives the on-screen
-// keypad and hardware keyboard, and handles fullscreen / wake lock / pause on hide.
-import { Emulator, type Suite } from '../emulator';
-import { CanvasFontRenderer, defaultFontSizes } from '../midp/fonts';
-import type { RecordStorage } from '../midp/platform';
-import { Surface } from '../midp/surface';
-import type { WebAudioHost } from './audio';
+// The in-game workspace: several MIDlets ("tabs") running at once, shown one at a time or side by
+// side in a grid, with one on-screen keypad and one set of hardware bindings that drive the focused
+// tab, or every synced tab when input sync is on. Hidden tabs keep running without drawing.
+import type { Suite } from '../emulator';
+import type { TextRequest } from '../midp/platform';
+import type { AudioEngine } from './audio';
+import { buildBindingMap, readGamepads } from './controls';
 import { Keypad } from './keypad';
-import type { ProxyNetHost } from './net';
-import { parseSysProps, rmsPrefix, type AppEntry, type AppSettings } from './store';
+import { Session } from './session';
+import type { AppEntry, AppSettings } from './store';
 
-export interface PlayerUI {
+export interface WorkspaceUI {
   root: HTMLElement;
   body: HTMLElement;
   stage: HTMLElement;
-  canvas: HTMLCanvasElement;
   keypad: HTMLElement;
-  overlay: HTMLElement;
   fps: HTMLElement;
 }
 
-export interface PlayerServices {
-  audio: WebAudioHost;
-  net: ProxyNetHost;
+export interface WorkspaceServices {
+  engine: AudioEngine;
+  bridge(): string;
   log(line: string, err?: boolean): void;
-  editText(title: string | null, text: string, max: number, constraints: number): Promise<string | null>;
-  onExit(reason: string): void;
+  editText(req: TextRequest): Promise<{ text: string; command: number } | null>;
+  /** Persists an app entry whose settings changed (keypad layout edits). */
+  saveApp(app: AppEntry): void;
+  /** Tabs were added, removed, focused or changed state. */
+  changed(): void;
+  closeRequested(s: Session): void;
 }
 
-class LocalRecordStorage implements RecordStorage {
-  constructor(private prefix: string) {}
-  get(n: string) {
-    try {
-      const v = localStorage.getItem(this.prefix + n);
-      if (v == null) return null;
-      const bin = atob(v);
-      const out = new Uint8Array(bin.length);
-      for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-      return out;
-    } catch {
-      return null;
-    }
-  }
-  set(n: string, d: Uint8Array) {
-    try {
-      let bin = '';
-      for (let i = 0; i < d.length; i += 0x8000) bin += String.fromCharCode.apply(null, Array.from(d.subarray(i, i + 0x8000)));
-      localStorage.setItem(this.prefix + n, btoa(bin));
-      return true;
-    } catch {
-      return false;
-    }
-  }
-  delete(n: string) {
-    const had = localStorage.getItem(this.prefix + n) != null;
-    localStorage.removeItem(this.prefix + n);
-    return had;
-  }
-  list() {
-    const out: string[] = [];
-    for (let i = 0; i < localStorage.length; i++) {
-      const k = localStorage.key(i)!;
-      if (k.startsWith(this.prefix)) out.push(k.slice(this.prefix.length));
-    }
-    return out;
-  }
-}
-
-async function decodeImage(bytes: Uint8Array): Promise<Surface | null> {
-  try {
-    const bmp = await createImageBitmap(new Blob([bytes.slice().buffer as ArrayBuffer]));
-    const c = document.createElement('canvas');
-    c.width = bmp.width;
-    c.height = bmp.height;
-    const cx = c.getContext('2d')!;
-    cx.drawImage(bmp, 0, 0);
-    const d = cx.getImageData(0, 0, bmp.width, bmp.height);
-    const s = new Surface(bmp.width, bmp.height, 0);
-    s.px.set(new Uint32Array(d.data.buffer));
-    return s;
-  } catch {
-    return null;
-  }
-}
-
-/** Hardware keyboard -> MIDP key codes. */
-const KEYMAP: Record<string, number> = {
-  ArrowUp: -1, ArrowDown: -2, ArrowLeft: -3, ArrowRight: -4,
-  Enter: -5, NumpadEnter: -5, Space: -5,
-  KeyQ: -6, F1: -6, BracketLeft: -6,
-  KeyW: -7, F2: -7, BracketRight: -7,
-  Backspace: -8, Delete: -8,
-  Digit0: 48, Digit1: 49, Digit2: 50, Digit3: 51, Digit4: 52, Digit5: 53, Digit6: 54, Digit7: 55, Digit8: 56, Digit9: 57,
-  Numpad0: 48, Numpad1: 49, Numpad2: 50, Numpad3: 51, Numpad4: 52, Numpad5: 53, Numpad6: 54, Numpad7: 55, Numpad8: 56, Numpad9: 57,
-  NumpadMultiply: 42, NumpadDivide: 35, KeyE: 42, KeyR: 35,
-};
-
-export function keyCodeFor(e: KeyboardEvent): number | undefined {
-  if (e.key === '*') return 42;
-  if (e.key === '#') return 35;
-  return KEYMAP[e.code];
-}
+export type ViewMode = 'single' | 'grid';
 
 export const coarsePointer = () => matchMedia('(pointer: coarse)').matches;
 
-export class Player {
-  emu: Emulator | null = null;
-  app: AppEntry | null = null;
-  private suite: Suite | null = null;
-  private midletIndex = 0;
-  private boot: Map<string, Uint8Array> | null = null;
-  private ctx: CanvasRenderingContext2D;
-  private imageData: ImageData | null = null;
-  private lastFrame: Surface | null = null;
+export class Workspace {
+  sessions: Session[] = [];
+  focused: Session | null = null;
+  view: ViewMode = 'single';
+  /** Mirror input to every tab whose `sync` flag is set. */
+  syncInput = false;
+  /** Keep drawing tabs that are not on screen. */
+  drawHidden = false;
+  /** Only the focused tab makes sound. */
+  soundFocusedOnly = true;
+  onEditSelection: (item: string | null) => void = () => {};
+
   private keypad: Keypad;
   private keypadVisible = false;
-  private frames = 0;
-  private fpsTimer: ReturnType<typeof setInterval> | null = null;
+  private keypadOverride: boolean | null = null;
+  /** MIDP key codes held by hardware input, with the number of bindings holding each. */
+  private hwHeld = new Map<number, number>();
+  private kbDown = new Map<string, number>();
+  private padHeld = new Set<string>();
+  private padRaf = 0;
+  private bindings = new Map<string, number>();
+  private fpsTimer: ReturnType<typeof setInterval>;
   private wakeLock: any = null;
-  private resizeObs: ResizeObserver;
-  private keysDown = new Set<number>();
-  paused = false;
+  /** Sessions that received the keys currently held (so releases reach the same tabs). */
+  private keyTargets = new Map<number, Session[]>();
 
-  constructor(private ui: PlayerUI, private svc: PlayerServices) {
-    this.ctx = ui.canvas.getContext('2d')!;
+  constructor(private ui: WorkspaceUI, private svc: WorkspaceServices) {
     this.keypad = new Keypad(ui.keypad, {
-      down: (c) => { svc.audio.unlock(); this.emu?.platform.keyDown(c); },
-      up: (c) => this.emu?.platform.keyUp(c),
-    });
-    this.resizeObs = new ResizeObserver(() => this.layout());
-    this.resizeObs.observe(ui.body);
-    this.bindPointer();
-    document.addEventListener('visibilitychange', () => this.onVisibility());
-  }
-
-  get settings(): AppSettings | null { return this.app?.settings ?? null; }
-  get running(): boolean { return !!this.emu && !this.emu.vm.halted; }
-
-  // ---------------------------------------------------------------- lifecycle
-  async start(app: AppEntry, suite: Suite, boot: Map<string, Uint8Array>, midletIndex = 0): Promise<void> {
-    this.stop();
-    this.app = app;
-    this.suite = suite;
-    this.boot = boot;
-    this.midletIndex = midletIndex;
-    const s = app.settings;
-    const w = s.width, h = s.height;
-    const auto = defaultFontSizes(w);
-    const fonts = new CanvasFontRenderer({
-      small: s.fontSmall || auto.small, medium: s.fontMedium || auto.medium, large: s.fontLarge || auto.large,
-    }, undefined, undefined, !s.fontAA);
-
-    this.ui.canvas.width = w;
-    this.ui.canvas.height = h;
-    this.imageData = this.ctx.createImageData(w, h);
-    this.lastFrame = null;
-    this.ctx.fillStyle = '#000';
-    this.ctx.fillRect(0, 0, w, h);
-    this.ui.overlay.hidden = true;
-    this.applySettings();
-
-    const e = new Emulator({
-      bootClasspath: boot,
-      suite,
-      midletIndex,
-      width: w,
-      height: h,
-      fonts,
-      storage: new LocalRecordStorage(rmsPrefix(app.id)),
-      systemProperties: parseSysProps(s.sysProps),
-      print: (stream, line) => this.svc.log(line, stream === 'err'),
-      host: {
-        present: (surf) => this.present(surf),
-        setSoftLabels: (l, r) => this.keypad.setSoftLabels(l, r),
-        vibrate: (ms) => { try { navigator.vibrate?.(Math.min(ms, 1000)); } catch { /* ignore */ } },
-        editText: (t, text, max, c) => this.svc.editText(t, text, max, c),
-        openUrl: (url) => { if (/^https?:/i.test(url)) window.open(url, '_blank', 'noopener'); },
-        onFatal: (msg) => this.showOverlay('MIDlet failed to start', msg),
-        decodeImage,
-        audio: this.svc.audio,
-        net: this.svc.net,
+      down: (c) => this.press(c),
+      up: (c) => this.release(c),
+      layoutChanged: (key, layout) => {
+        const s = this.focused?.app.settings;
+        if (!s) return;
+        const next = { ...s.keyLayouts };
+        if (Object.keys(layout).length) next[key] = layout; else delete next[key];
+        s.keyLayouts = next;
+        svc.saveApp(this.focused!.app);
       },
+      selectionChanged: (item) => this.onEditSelection(item),
     });
-    e.onExit((_code, reason) => {
-      if (this.emu !== e) return;
-      this.svc.audio.closeAll();
-      this.svc.onExit(reason ?? 'stopped');
+    new ResizeObserver(() => this.layout()).observe(ui.body);
+    window.addEventListener('gamepadconnected', (e) => {
+      svc.log(`[input] gamepad connected: ${(e as GamepadEvent).gamepad.id}`);
+      this.pollPads();
     });
-    this.emu = e;
-    this.paused = false;
-    this.svc.log(`— ${suite.name}: starting ${suite.midlets[midletIndex]?.className} (${w}×${h})`);
+    document.addEventListener('visibilitychange', () => this.onVisibility());
     this.fpsTimer = setInterval(() => {
-      this.ui.fps.textContent = `${this.frames} fps`;
-      this.frames = 0;
+      for (const s of this.sessions) s.sampleFps();
+      if (this.focused) this.ui.fps.textContent = `${this.focused.fps} fps`;
     }, 1000);
+  }
+
+  get settings(): AppSettings | null { return this.focused?.app.settings ?? null; }
+  get keypadShown(): boolean { return this.keypadVisible; }
+  get editing(): boolean { return this.keypad.isEditing; }
+
+  // ---------------------------------------------------------------- tabs
+  open(app: AppEntry, suite: Suite, boot: Map<string, Uint8Array>, midletIndex: number, slot: number, via: string): Session {
+    const s = new Session({
+      engine: this.svc.engine,
+      bridge: () => this.svc.bridge(),
+      log: (l, e) => this.svc.log(l, e),
+      editText: (r) => this.svc.editText(r),
+      onExit: () => this.svc.changed(),
+      onPointer: (ss) => { if (ss !== this.focused) this.focus(ss); },
+    }, app, suite, boot, midletIndex, slot, via);
+    s.onSoftLabels = (l, r) => { if (s === this.focused) this.keypad.setSoftLabels(l, r); };
+    s.onScreenPointer = (type, x, y) => this.pointer(s, type, x, y);
+    s.onOverlayAction((a) => {
+      if (a === 'restart') { s.start(); this.svc.changed(); }
+      if (a === 'close') this.svc.closeRequested(s);
+    });
+    this.sessions.push(s);
+    this.ui.stage.appendChild(s.tile);
+    s.start();
+    this.focus(s);
     void this.acquireWakeLock();
-    e.start();
-    this.ui.canvas.focus({ preventScroll: true });
+    return s;
   }
 
-  restart(): void {
-    if (this.app && this.suite && this.boot) void this.start(this.app, this.suite, this.boot, this.midletIndex);
-  }
-
-  stop(): void {
-    this.keypad.releaseAll();
-    this.keysDown.clear();
-    if (this.emu) {
-      const e = this.emu;
-      this.emu = null;
-      e.stop();
+  close(s: Session): void {
+    const i = this.sessions.indexOf(s);
+    if (i < 0) return;
+    this.releaseKeys();
+    s.dispose();
+    this.sessions.splice(i, 1);
+    if (this.focused === s) {
+      this.focused = null;
+      const next = this.sessions[Math.min(i, this.sessions.length - 1)];
+      if (next) this.focus(next);
     }
-    if (this.fpsTimer) { clearInterval(this.fpsTimer); this.fpsTimer = null; }
-    this.svc.audio.closeAll();
-    void this.wakeLock?.release?.().catch(() => {});
-    this.wakeLock = null;
+    if (!this.sessions.length) {
+      this.setEditing(false);
+      void this.wakeLock?.release?.().catch(() => {});
+      this.wakeLock = null;
+    }
+    this.applyVisibility();
+    this.layout();
+    this.svc.changed();
   }
 
-  /** Re-applies settings that do not need a restart. */
+  closeAll(): void {
+    for (const s of [...this.sessions]) this.close(s);
+  }
+
+  focus(s: Session): void {
+    if (this.focused === s) return;
+    this.releaseKeys();
+    this.setEditing(false);
+    this.focused = s;
+    for (const x of this.sessions) x.tile.classList.toggle('focused', x === s);
+    this.applySettings();
+    this.keypad.setSoftLabels(...s.softLabels);
+    s.canvas.focus({ preventScroll: true });
+    this.svc.changed();
+  }
+
+  focusIndex(i: number): void {
+    const s = this.sessions[i];
+    if (s) this.focus(s);
+  }
+
+  restart(s = this.focused): void {
+    if (!s) return;
+    this.releaseKeys();
+    s.start();
+    s.setVisible(s.visible, this.drawHidden);
+    this.svc.changed();
+  }
+
+  setView(v: ViewMode): void {
+    this.view = v;
+    this.ui.stage.dataset.view = v;
+    this.applyVisibility();
+    this.layout();
+    this.svc.changed();
+  }
+
+  setDrawHidden(on: boolean): void {
+    this.drawHidden = on;
+    this.applyVisibility();
+  }
+
+  setSoundFocusedOnly(on: boolean): void {
+    this.soundFocusedOnly = on;
+    this.applyVisibility();
+  }
+
+  /** False while another page (the library) covers the workspace: every tab runs hidden. */
+  shown = true;
+
+  setShown(on: boolean): void {
+    this.shown = on;
+    if (!on) this.releaseKeys();
+    this.applyVisibility();
+    if (on) this.layout();
+  }
+
+  /** Which tiles are on screen, which tabs draw, which make sound. */
+  private applyVisibility(): void {
+    for (const s of this.sessions) {
+      const visible = this.shown && (this.view === 'grid' || s === this.focused);
+      s.setVisible(visible, this.drawHidden);
+      s.audio.setSessionMuted(this.soundFocusedOnly && s !== this.focused);
+    }
+  }
+
+  /** Re-applies the focused tab's settings that do not need a restart. */
   applySettings(): void {
     const s = this.settings;
     if (!s) return;
-    this.ui.stage.style.background = s.background;
-    this.ui.canvas.style.imageRendering = s.filter ? 'auto' : 'pixelated';
-    this.ui.fps.hidden = !s.showFps;
     this.ui.keypad.style.setProperty('--kp-opacity', String(s.keypadOpacity));
     this.keypad.haptics = s.haptics;
-    this.keypad.build(s.keypadType);
-    this.keypadVisible = s.keypad === 'show' || (s.keypad === 'auto' && coarsePointer());
+    this.keypad.build(s.keypadType, s.keyLayouts);
+    this.keypadVisible = this.keypadOverride ?? (s.keypad === 'show' || (s.keypad === 'auto' && coarsePointer()));
+    this.ui.fps.hidden = !s.showFps;
+    this.releaseHardware();
+    this.bindings = buildBindingMap(s.bindings);
+    this.pollPads();
+    this.applyVisibility();
     this.layout();
   }
 
   toggleKeypad(): boolean {
     this.keypadVisible = !this.keypadVisible;
-    if (!this.keypadVisible) this.keypad.releaseAll();
+    this.keypadOverride = this.keypadVisible;
+    if (!this.keypadVisible) { this.keypad.releaseAll(); this.setEditing(false); }
     this.layout();
     return this.keypadVisible;
   }
 
-  get keypadShown(): boolean { return this.keypadVisible; }
-
-  // ---------------------------------------------------------------- rendering
-  private present(s: Surface): void {
-    this.lastFrame = s;
-    this.frames++;
-    if (!this.imageData || this.imageData.width !== s.w || this.imageData.height !== s.h) {
-      this.imageData = this.ctx.createImageData(s.w, s.h);
-    }
-    new Uint32Array(this.imageData.data.buffer).set(s.px);
-    this.ctx.putImageData(this.imageData, 0, 0);
-  }
-
-  /** Places the keypad and scales the canvas into the remaining stage area. */
+  // ---------------------------------------------------------------- layout
   layout(): void {
-    const s = this.settings;
-    const { body, keypad, canvas, stage } = this.ui;
+    const { body, keypad, stage } = this.ui;
     const bw = body.clientWidth, bh = body.clientHeight;
     if (!bw || !bh) return;
-    const W = canvas.width, H = canvas.height;
+    const f = this.focused;
+    const W = f?.canvas.width || 240, H = f?.canvas.height || 320;
     let mode: 'none' | 'portrait' | 'landscape' = 'none';
-    if (this.keypadVisible) {
-      // below the screen when it leaves enough room, otherwise overlay the sides
+    if (this.keypadVisible && f) {
+      // below the screen when that leaves enough room, otherwise over the sides of the stage
       const fitBelow = Math.min(bw / W, (bh * 0.58) / H);
       mode = bw / bh > 0.82 || fitBelow * W < bw * 0.45 ? 'landscape' : 'portrait';
     }
     keypad.hidden = mode === 'none';
-    keypad.className = `keypad ${mode}`;
+    keypad.className = `keypad ${mode}${this.keypad.isEditing ? ' editing' : ''}`;
     body.dataset.keypad = mode;
     if (mode === 'portrait') {
       const kh = Math.min(Math.round(bh * 0.42), Math.round(bw * 0.78), 340);
       keypad.style.height = `${kh}px`;
+      this.keypad.place('portrait', bw, kh);
     } else {
       keypad.style.height = '';
+      if (mode === 'landscape') this.keypad.place('landscape', bw, bh);
     }
     const aw = stage.clientWidth, ah = stage.clientHeight;
     if (!aw || !ah) return;
-    let cw: number, ch: number;
-    const fit = Math.min(aw / W, ah / H);
-    switch (s?.scale ?? 'fit') {
-      case 'fill': cw = aw; ch = ah; break;
-      case 'native': cw = W * Math.min(1, fit); ch = H * Math.min(1, fit); break;
-      case 'integer': {
-        const k = fit >= 1 ? Math.floor(fit) : fit;
-        cw = W * k; ch = H * k;
-        break;
+    const visible = this.sessions.filter((s) => s.visible);
+    if (this.view === 'grid' && visible.length > 1) {
+      // choose the column count that gives the biggest screens
+      let best = { cols: 1, scale: 0 };
+      for (let cols = 1; cols <= visible.length; cols++) {
+        const rows = Math.ceil(visible.length / cols);
+        const scale = Math.min((aw / cols - 8) / W, (ah / rows - 8) / H);
+        if (scale > best.scale) best = { cols, scale };
       }
-      default: cw = W * fit; ch = H * fit;
+      const rows = Math.ceil(visible.length / best.cols);
+      stage.style.gridTemplateColumns = `repeat(${best.cols}, minmax(0, 1fr))`;
+      stage.style.gridTemplateRows = `repeat(${rows}, minmax(0, 1fr))`;
+      const tw = aw / best.cols - 8, th = ah / rows - 8;
+      for (const s of visible) s.fit(s.app.settings.scale === 'fill' ? 'fit' : s.app.settings.scale, tw, th - 18);
+    } else {
+      stage.style.gridTemplateColumns = '';
+      stage.style.gridTemplateRows = '';
+      for (const s of visible) s.fit(s.app.settings.scale, aw, ah);
     }
-    canvas.style.width = `${Math.floor(cw)}px`;
-    canvas.style.height = `${Math.floor(ch)}px`;
   }
 
-  showOverlay(title: string, sub = ''): void {
-    const o = this.ui.overlay;
-    o.hidden = false;
-    o.querySelector('.overlay-title')!.textContent = title;
-    o.querySelector('.overlay-sub')!.textContent = sub;
+  // ---------------------------------------------------------------- keypad layout editing
+  setEditing(on: boolean): void {
+    if (on && !this.focused) return;
+    if (on && !this.keypadVisible) { this.keypadVisible = true; this.keypadOverride = true; }
+    if (on !== this.keypad.isEditing) {
+      this.keypad.setEditing(on);
+      this.ui.root.classList.toggle('editing-keys', on);
+    }
+    this.layout();
   }
 
-  screenshot(): void {
-    this.ui.canvas.toBlob((b) => {
-      if (!b) return;
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(b);
-      a.download = `${(this.app?.name ?? 'screen').replace(/[^\w.-]+/g, '_')}-${Date.now()}.png`;
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
-    }, 'image/png');
+  resizeSelected(delta: number): void { this.keypad.resizeSelected(delta); }
+  resetLayout(): void { this.keypad.resetLayout(); }
+
+  // ---------------------------------------------------------------- input routing
+  /** Tabs that receive input now: the focused one, plus every synced tab when sync is on. */
+  private targets(): Session[] {
+    const f = this.focused;
+    if (!f) return [];
+    if (!this.syncInput || !f.sync) return [f];
+    return this.sessions.filter((s) => s === f || s.sync);
   }
 
-  // ---------------------------------------------------------------- input
+  private press(code: number): void {
+    this.svc.engine.unlock();
+    const t = this.targets();
+    this.keyTargets.set(code, t);
+    for (const s of t) s.keyDown(code);
+  }
+
+  private release(code: number): void {
+    const t = this.keyTargets.get(code) ?? this.targets();
+    this.keyTargets.delete(code);
+    for (const s of t) s.keyUp(code);
+  }
+
+  /** Repeat of a held key (keyboard auto-repeat): goes to the tabs that got the press. */
+  private repeat(code: number): void {
+    for (const s of this.keyTargets.get(code) ?? this.targets()) s.keyDown(code);
+  }
+
+  private pointer(from: Session, type: 'down' | 'up' | 'move', x: number, y: number): void {
+    if (from !== this.focused) { from.pointer(type, x, y); return; }
+    for (const s of this.targets()) s.pointer(type, x, y);
+  }
+
+  private codeForKey(e: KeyboardEvent): number | undefined {
+    const c = this.bindings.get(`k:${e.code}`);
+    if (c !== undefined) return c;
+    if (e.key === '*') return 42;
+    if (e.key === '#') return 35;
+    return undefined;
+  }
+
+  private hwPress(code: number): void {
+    const n = this.hwHeld.get(code) ?? 0;
+    this.hwHeld.set(code, n + 1);
+    if (n === 0) this.press(code);
+  }
+
+  private hwRelease(code: number): void {
+    const n = this.hwHeld.get(code) ?? 0;
+    if (n <= 1) {
+      this.hwHeld.delete(code);
+      if (n === 1) this.release(code);
+    } else {
+      this.hwHeld.set(code, n - 1);
+    }
+  }
+
   keyDown(e: KeyboardEvent): boolean {
-    const code = keyCodeFor(e);
-    if (code === undefined || !this.emu || e.ctrlKey || e.metaKey || e.altKey) return false;
-    this.svc.audio.unlock();
-    this.keysDown.add(code);
-    this.emu.platform.keyDown(code);
+    if (!this.focused || e.ctrlKey || e.metaKey || e.altKey || this.keypad.isEditing) return false;
+    const code = this.codeForKey(e);
+    if (code === undefined) return false;
+    if (this.kbDown.has(e.code)) this.repeat(code);
+    else { this.kbDown.set(e.code, code); this.hwPress(code); }
     return true;
   }
 
   keyUp(e: KeyboardEvent): boolean {
-    const code = keyCodeFor(e);
-    if (code === undefined || !this.emu) return false;
-    this.keysDown.delete(code);
-    this.emu.platform.keyUp(code);
+    const code = this.kbDown.get(e.code);
+    if (code === undefined) return false;
+    this.kbDown.delete(e.code);
+    this.hwRelease(code);
     return true;
+  }
+
+  private releaseHardware(): void {
+    for (const code of this.hwHeld.keys()) this.release(code);
+    this.hwHeld.clear();
+    this.kbDown.clear();
+    this.padHeld.clear();
   }
 
   releaseKeys(): void {
     this.keypad.releaseAll();
-    this.emu?.platform.releaseAllKeys();
-    this.keysDown.clear();
+    this.releaseHardware();
+    for (const [code, t] of this.keyTargets) for (const s of t) s.keyUp(code);
+    this.keyTargets.clear();
+    for (const s of this.sessions) s.releaseKeys();
   }
 
-  private bindPointer(): void {
-    const c = this.ui.canvas;
-    let down = false;
-    const point = (e: PointerEvent): [number, number] => {
-      const r = c.getBoundingClientRect();
-      return [((e.clientX - r.left) / r.width) * c.width, ((e.clientY - r.top) / r.height) * c.height];
+  private pollPads(): void {
+    if (this.padRaf || !navigator.getGamepads) return;
+    const tick = () => {
+      this.padRaf = 0;
+      if (!this.sessions.length) return;
+      if (!navigator.getGamepads().some((p) => p && p.connected)) { this.padHeld.clear(); return; }
+      const now = this.keypad.isEditing || document.hidden ? new Set<string>() : readGamepads();
+      for (const b of this.padHeld) if (!now.has(b)) { const c = this.bindings.get(b); if (c !== undefined) this.hwRelease(c); }
+      for (const b of now) if (!this.padHeld.has(b)) { const c = this.bindings.get(b); if (c !== undefined) this.hwPress(c); }
+      this.padHeld = now;
+      this.padRaf = requestAnimationFrame(tick);
     };
-    c.addEventListener('pointerdown', (e) => {
-      if (!this.emu) return;
-      e.preventDefault();
-      this.svc.audio.unlock();
-      down = true;
-      try { c.setPointerCapture(e.pointerId); } catch { /* ignore */ }
-      const [x, y] = point(e);
-      this.emu.platform.pointer('down', x, y);
-    });
-    c.addEventListener('pointermove', (e) => {
-      if (!this.emu || !down) return;
-      const [x, y] = point(e);
-      this.emu.platform.pointer('move', x, y);
-    });
-    const up = (e: PointerEvent) => {
-      if (!this.emu || !down) return;
-      down = false;
-      const [x, y] = point(e);
-      this.emu.platform.pointer('up', x, y);
-    };
-    c.addEventListener('pointerup', up);
-    c.addEventListener('pointercancel', up);
-    c.addEventListener('contextmenu', (e) => e.preventDefault());
+    this.padRaf = requestAnimationFrame(tick);
   }
 
   // ---------------------------------------------------------------- device integration
   private async acquireWakeLock(): Promise<void> {
+    if (this.wakeLock || !this.sessions.length) return;
     try {
       this.wakeLock = await (navigator as any).wakeLock?.request('screen');
+      this.wakeLock?.addEventListener?.('release', () => { this.wakeLock = null; });
     } catch {
       this.wakeLock = null;
     }
   }
 
   private onVisibility(): void {
-    if (!this.emu) return;
     if (document.hidden) {
       this.releaseKeys();
-      if (this.settings?.pauseWhenHidden && !this.paused) {
-        this.paused = true;
-        this.emu.platform.pause();
-        this.svc.audio.setSuspended(true);
-      }
+      for (const s of this.sessions) s.pause();
+      if (this.sessions.some((s) => s.paused)) this.svc.engine.setSuspended(true);
     } else {
-      if (this.paused) {
-        this.paused = false;
-        this.emu.platform.resume();
-        this.svc.audio.setSuspended(false);
-      }
-      if (this.lastFrame) this.present(this.lastFrame);
+      for (const s of this.sessions) s.resume();
+      this.svc.engine.setSuspended(false);
+      this.applyVisibility();
       void this.acquireWakeLock();
     }
   }
@@ -409,4 +428,6 @@ export class Player {
       if (document.fullscreenElement) await document.exitFullscreen();
     } catch { /* ignore */ }
   }
+
+  dispose(): void { clearInterval(this.fpsTimer); }
 }
