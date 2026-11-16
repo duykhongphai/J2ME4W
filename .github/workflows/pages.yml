@@ -36,5 +36,5 @@ jobs:
           git init -q
           git checkout -q -b gh-pages
           git add -A
-          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" commit -q -m "Deploy ${GITHUB_SHA::7}"
+          git -c user.name="${GITHUB_ACTOR}" -c user.email="${GITHUB_ACTOR_ID}+${GITHUB_ACTOR}@users.noreply.github.com" commit -q -m "Deploy ${GITHUB_SHA::7}"
           git push -q -f "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git" gh-pages
