@@ -2,7 +2,6 @@ package j2me4w;
 
 import java.io.OutputStream;
 
-/** System.out / System.err sink: bytes are buffered natively and printed per line. */
 public final class ConsoleOutputStream extends OutputStream {
     private final boolean err;
     public ConsoleOutputStream(boolean err) { this.err = err; }

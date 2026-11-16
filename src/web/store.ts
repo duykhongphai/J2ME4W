@@ -1,4 +1,3 @@
-// Installed MIDlet library: metadata + per-app settings + JAR bytes in IndexedDB.
 import type { MIDletInfo } from '../emulator';
 
 export type ScaleMode = 'fit' | 'integer' | 'fill' | 'native';
@@ -14,7 +13,6 @@ export interface AppSettings {
   background: string;
   showFps: boolean;
   orientation: Orientation;
-  /** Font pixel sizes; 0 = automatic for the screen size. */
   fontSmall: number;
   fontMedium: number;
   fontLarge: number;
@@ -24,15 +22,11 @@ export interface AppSettings {
   keypadOpacity: number;
   haptics: boolean;
   pauseWhenHidden: boolean;
-  /** "key: value" lines, e.g. "microedition.platform: Nokia6300". */
   sysProps: string;
-  /** Custom on-screen key positions, keyed by "<keypadType>-<portrait|landscape>". */
   keyLayouts: Record<string, Record<string, KeyItemPos>>;
-  /** Hardware bindings per MIDP key code ("k:<KeyboardEvent.code>", "p:<pad button>", "a:<axis>±"). */
   bindings: Record<string, string[]>;
 }
 
-/** Centre of an on-screen key group as a fraction of the keypad area, plus a size factor. */
 export interface KeyItemPos { x: number; y: number; s: number }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -63,13 +57,11 @@ export interface AppEntry {
   vendor: string;
   version: string;
   size: number;
-  /** data: URL of the MIDlet icon, if any. */
   icon: string | null;
   midlets: MIDletInfo[];
   addedAt: number;
   lastPlayed: number;
   settings: AppSettings;
-  /** Bundled with the site (not stored in IndexedDB, cannot be deleted). */
   builtin?: boolean;
 }
 
@@ -139,13 +131,8 @@ export class AppStore {
   }
 }
 
-/**
- * localStorage prefix holding an app's RecordStores. Slot 1 is the app's main save data; other slots
- * let several tabs of the same game keep separate saves (one account per tab, for example).
- */
 export const rmsPrefix = (id: string, slot = 1) => (slot <= 1 ? `j2me4w:rms:${id}:` : `j2me4w:rms:${id}@${slot}:`);
 
-/** Deletes the RecordStores of every slot of an app. Returns the number of stores removed. */
 export function clearAppData(id: string): number {
   const keys: string[] = [];
   for (let i = 0; i < localStorage.length; i++) {
@@ -169,11 +156,10 @@ export function newId(): string {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 }
 
-/** Per app + data slot preferences of a tab (upstream proxy). */
 export interface TabPrefs { via: string }
 export function loadTabPrefs(appId: string, slot: number): TabPrefs {
   try { return { via: '', ...JSON.parse(localStorage.getItem(`j2me4w:tab:${appId}:${slot}`) ?? '{}') }; } catch { return { via: '' }; }
 }
 export function saveTabPrefs(appId: string, slot: number, p: TabPrefs): void {
-  try { localStorage.setItem(`j2me4w:tab:${appId}:${slot}`, JSON.stringify(p)); } catch { /* ignore */ }
+  try { localStorage.setItem(`j2me4w:tab:${appId}:${slot}`, JSON.stringify(p)); } catch {  }
 }

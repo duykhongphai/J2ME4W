@@ -4,7 +4,6 @@ import java.io.*;
 import java.util.Vector;
 import javax.microedition.io.HttpsConnection;
 
-/** HttpConnection whose request is sent (through the host) when the first response data is needed. */
 public final class HttpConnectionImpl implements HttpsConnection {
     private static final int SETUP = 0, CONNECTED = 1, CLOSED = 2;
 
@@ -16,7 +15,6 @@ public final class HttpConnectionImpl implements HttpsConnection {
     private HttpResponse resp;
     private int state = SETUP;
 
-    // parsed URL parts
     private final String protocol, host, file, query, ref;
     private final int port;
 
@@ -61,7 +59,6 @@ public final class HttpConnectionImpl implements HttpsConnection {
         state = CONNECTED;
     }
 
-    // ------------------------------------------------------------ request
     public String getURL() { return url; }
     public String getProtocol() { return protocol; }
     public String getHost() { return host; }
@@ -89,7 +86,6 @@ public final class HttpConnectionImpl implements HttpsConnection {
         reqValues.addElement(value);
     }
 
-    // ------------------------------------------------------------ response
     public int getResponseCode() throws IOException { connect(); return resp.status; }
     public String getResponseMessage() throws IOException { connect(); return resp.message; }
     public String getHeaderField(String name) throws IOException {
@@ -130,7 +126,6 @@ public final class HttpConnectionImpl implements HttpsConnection {
         }
     }
 
-    // ------------------------------------------------------------ streams
     public InputStream openInputStream() throws IOException {
         connect();
         return new ByteArrayInputStream(resp.body);

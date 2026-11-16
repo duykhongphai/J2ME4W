@@ -1,5 +1,3 @@
-// The virtual machine: class loading/linking/initialization, object model helpers,
-// monitors, green threads and the cooperative scheduler.
 import { parseClassFile, Tag, type ClassFile } from './classfile';
 import {
   ClassState, Frame, JArray, JClass, JField, JMethod, JObject, JThread, Monitor, ThreadState,
@@ -7,30 +5,20 @@ import {
 } from './model';
 import { execute } from './interpreter';
 
-/** Thrown (as a JS exception) to propagate a Java exception. Not an Error subclass on purpose: no stack capture. */
 export class JavaThrow {
   constructor(public readonly ex: JObject) {}
 }
 
-/** Native return value: the thread is now blocked; it is resumed via vm.resume(). */
 export const SUSPEND = Symbol('suspend');
-/** Native return value: the native pushed Java frames itself; nothing is pushed to the caller now. */
 export const FRAMES_PUSHED = Symbol('frames-pushed');
-/** Native return value: re-execute the invoke instruction later (the thread yields). */
 export const RETRY = Symbol('retry');
-/** Native return value (void natives only): continue after the call, but end the thread's time slice. */
 export const YIELD = Symbol('yield');
 
 export interface VMOptions {
-  /** Bootstrap classes and resources (rt.jar entries). */
   bootClasspath: Map<string, Uint8Array>;
-  /** Application JAR entries. */
   appClasspath: Map<string, Uint8Array>;
-  /** System.out / System.err sink (one call per line). */
   print?: (stream: 'out' | 'err', line: string) => void;
-  /** Instructions executed per thread time slice. */
   sliceBudget?: number;
-  /** Max wall-clock ms the VM runs before yielding to the host event loop. */
   tickMs?: number;
 }
 
@@ -48,7 +36,6 @@ export class VM {
   current: JThread | null = null;
   halted = false;
   exitListeners: ((code: number, reason?: string) => void)[] = [];
-  /** Platform services used by natives (MIDP layer). */
   platform: any = null;
   private hashSeed = 0x1234;
   private tickScheduled = false;
@@ -65,18 +52,14 @@ export class VM {
     this.tickMs = opts.tickMs ?? 12;
   }
 
-  // ------------------------------------------------------------------ natives
-  /** Registers natives for a class. Keys are "name(desc)ret", e.g. "length()I". */
   registerNatives(className: string, fns: Record<string, NativeFn>): void {
     for (const [k, fn] of Object.entries(fns)) this.natives.set(`${className}.${k}`, fn);
   }
 
-  // ------------------------------------------------------------------ class loading
   getResource(path: string): Uint8Array | null {
     return this.app.get(path) ?? this.boot.get(path) ?? null;
   }
 
-  /** Loads and links a class by internal name. Throws NoClassDefFoundError (as JavaThrow) if missing. */
   loadClass(name: string): JClass {
     const c = this.classes.get(name);
     if (c) return c;
@@ -93,7 +76,6 @@ export class VM {
     const existing = this.classes.get(name);
     if (existing) return existing;
     if (name[0] === '[') return this.arrayClass(name);
-    // Bootstrap classes win, so applications cannot replace the platform.
     const bytes = this.boot.get(name + '.class') ?? this.app.get(name + '.class');
     if (!bytes) return null;
     return this.defineClass(name, parseClassFile(bytes));
@@ -111,7 +93,6 @@ export class VM {
       this.classes.delete(name);
       throw e;
     }
-    // fields
     let slot = cls.superClass ? cls.superClass.fieldTemplate.length : 0;
     cls.fieldTemplate = cls.superClass ? cls.superClass.fieldTemplate.slice() : [];
     let sslot = 0;
@@ -122,7 +103,6 @@ export class VM {
       if (isStatic) cls.statics[fld.slot] = defaultValue(f.desc);
       else cls.fieldTemplate[fld.slot] = defaultValue(f.desc);
     }
-    // methods
     for (const m of cf.methods) {
       const jm = new JMethod(cls, m.name, m.desc, m.access, m.code);
       if (jm.isNative) jm.native = this.bindNative(jm);
@@ -166,17 +146,10 @@ export class VM {
     return c;
   }
 
-  /** Name of the array class whose components are `cls`. */
   arrayClassOf(cls: JClass): JClass {
     return this.arrayClass(cls.isArray ? '[' + cls.name : '[L' + cls.name + ';');
   }
 
-  // ------------------------------------------------------------------ initialization
-  /**
-   * Makes sure `cls` is initialized for thread `t`.
-   * Returns 0 if ready, 1 if <clinit> frames were pushed (re-execute the instruction after they return),
-   * 2 if another thread is initializing it (yield and retry).
-   */
   ensureInit(t: JThread, cls: JClass): 0 | 1 | 2 {
     if (cls.state === ClassState.Initialized) return 0;
     if (cls.state === ClassState.Initializing) return cls.initThread === t ? 0 : 2;
@@ -206,7 +179,6 @@ export class VM {
     return pushed ? 1 : 0;
   }
 
-  /** Called when a <clinit> frame finishes (normally or abruptly). */
   clinitDone(cls: JClass, ok: boolean): void {
     cls.state = ok ? ClassState.Initialized : ClassState.Error;
     cls.initThread = null;
@@ -229,7 +201,6 @@ export class VM {
     }
   }
 
-  // ------------------------------------------------------------------ constant pool resolution
   resolveClass(cls: JClass, idx: number): JClass {
     let r = cls.resolved[idx];
     if (r) return r;
@@ -275,7 +246,6 @@ export class VM {
     return r;
   }
 
-  /** Resolves an ldc/ldc_w constant. */
   resolveConstant(cls: JClass, idx: number): unknown {
     const r = cls.resolved[idx];
     if (r !== undefined) return r;
@@ -291,7 +261,6 @@ export class VM {
     return v;
   }
 
-  // ------------------------------------------------------------------ objects
   newObject(cls: JClass): JObject {
     return new JObject(cls, cls.fieldTemplate.slice());
   }
@@ -337,12 +306,10 @@ export class VM {
     return o;
   }
 
-  /** Converts a Java string object to a JS string (null stays null). */
   jstr(o: JObject | null): string | null {
     return o == null ? null : o.s ?? '';
   }
 
-  /** Java String[] from JS strings. */
   strArray(values: string[]): JArray {
     const arr = this.newArray('[Ljava/lang/String;', values.length);
     values.forEach((v, i) => ((arr.a as any[])[i] = this.str(v)));
@@ -366,7 +333,6 @@ export class VM {
 
   identityHash(o: JObject): number {
     if (!o.hash) {
-      // xorshift for well-distributed, non-zero identity hashes
       let x = this.hashSeed;
       x ^= x << 13; x ^= x >>> 17; x ^= x << 5;
       this.hashSeed = x | 0;
@@ -414,7 +380,6 @@ export class VM {
     return this.isAssignable(o.cls, t);
   }
 
-  // ------------------------------------------------------------------ exceptions
   newThrowable(className: string, message?: string | null): JObject {
     const o = this.newObject(this.loadClass(className));
     if (message != null) this.setField(o, 'detailMessage', this.str(message));
@@ -447,7 +412,6 @@ export class VM {
     return ex.cls.javaName + (msg != null ? ': ' + msg : '');
   }
 
-  // ------------------------------------------------------------------ monitors
   monitorEnter(t: JThread, o: JObject): boolean {
     const m = (o.mon ??= new Monitor());
     if (m.owner === null) { m.owner = t; m.count = 1; return true; }
@@ -471,7 +435,6 @@ export class VM {
     if (w) this.makeRunnable(w);
   }
 
-  /** Object.wait(). Returns SUSPEND. */
   monitorWait(t: JThread, o: JObject, timeout: number): typeof SUSPEND {
     const m = o.mon;
     if (!m || m.owner !== t) this.throwNew('java/lang/IllegalMonitorStateException');
@@ -518,7 +481,6 @@ export class VM {
     } while (all);
   }
 
-  // ------------------------------------------------------------------ threads
   pushFrame(t: JThread, m: JMethod, args: any[]): Frame {
     if (t.frames.length >= MAX_FRAMES) this.throwNew('java/lang/StackOverflowError');
     const f = new Frame(m, args);
@@ -526,7 +488,6 @@ export class VM {
     return f;
   }
 
-  /** Creates a thread that will run `m` with `args`. */
   spawn(name: string, m: JMethod, args: any[], jobj: JObject | null = null): JThread {
     const t = new JThread(name);
     t.jobj = jobj;
@@ -538,7 +499,6 @@ export class VM {
     return t;
   }
 
-  /** Puts a suspended thread back on the run queue, delivering a native's return value. */
   resume(t: JThread, value?: unknown, wide = false): void {
     if (t.state === ThreadState.Dead) return;
     t.hasPending = value !== undefined;
@@ -547,7 +507,6 @@ export class VM {
     this.makeRunnable(t);
   }
 
-  /** Resumes a suspended thread by throwing an exception into it. */
   resumeThrow(t: JThread, className: string, message?: string): void {
     if (t.state === ThreadState.Dead) return;
     const prev = this.current;
@@ -596,7 +555,6 @@ export class VM {
     t.state = ThreadState.Dead;
     t.frames.length = 0;
     this.threads.delete(t);
-    // wake joiners waiting on the Thread object
     const m = t.jobj?.mon;
     if (m) {
       for (const w of m.waitSet.splice(0)) {
@@ -607,7 +565,6 @@ export class VM {
     }
   }
 
-  // ------------------------------------------------------------------ scheduler
   private scheduleTick(): void {
     if (this.tickScheduled || this.halted) return;
     this.tickScheduled = true;
@@ -640,7 +597,6 @@ export class VM {
     this.threadFinished(t);
   }
 
-  /** Stops every thread; the VM cannot be restarted. */
   exit(code: number, reason?: string): void {
     if (this.halted) return;
     this.halted = true;
@@ -653,8 +609,6 @@ export class VM {
     for (const l of this.exitListeners) l(code, reason);
   }
 
-  // ------------------------------------------------------------------ entry
-  /** Starts a new thread running a static method. */
   startStatic(className: string, methodKey: string, args: any[], threadName = 'main'): JThread {
     const cls = this.loadClass(className);
     const m = cls.methods.get(methodKey);
@@ -662,7 +616,6 @@ export class VM {
     const t = new JThread(threadName);
     this.threads.add(t);
     t.frames.push(new Frame(m, args));
-    // <clinit> frames go on top so they run first
     const prev = this.current;
     this.current = t;
     try { this.ensureInit(t, cls); } finally { this.current = prev; }
@@ -676,13 +629,13 @@ const EMPTY_FIELDS: any[] = [];
 
 export function newArrayData(kind: number, n: number): ArrayData {
   switch (kind) {
-    case 90: /* Z */ case 66: /* B */ return new Int8Array(n);
-    case 67: /* C */ return new Uint16Array(n);
-    case 83: /* S */ return new Int16Array(n);
-    case 73: /* I */ return new Int32Array(n);
-    case 70: /* F */ return new Float32Array(n);
-    case 68: /* D */ return new Float64Array(n);
-    case 74: /* J */ return new BigInt64Array(n);
+    case 90:  case 66:  return new Int8Array(n);
+    case 67:  return new Uint16Array(n);
+    case 83:  return new Int16Array(n);
+    case 73:  return new Int32Array(n);
+    case 70:  return new Float32Array(n);
+    case 68:  return new Float64Array(n);
+    case 74:  return new BigInt64Array(n);
     default: return new Array(n).fill(null);
   }
 }

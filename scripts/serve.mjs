@@ -1,5 +1,3 @@
-// Production server: serves dist/ and the MIDlet network bridge on one port.
-// Usage: npm run build && npm start   (PORT=8080, HOST=0.0.0.0 to listen on all interfaces)
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
@@ -19,7 +17,6 @@ if (!fs.existsSync(path.join(root, 'index.html'))) {
   process.exit(1);
 }
 
-// a loopback-bound server only serves this machine, so local upstream proxies are allowed
 const loopback = host === '127.0.0.1' || host === 'localhost' || host === '::1';
 const proxy = createProxy({ allowPrivateProxy: loopback || undefined });
 const server = http.createServer((req, res) => {

@@ -1,6 +1,3 @@
-// The in-game workspace: several MIDlets ("tabs") running at once, shown one at a time or side by
-// side in a grid, with one on-screen keypad and one set of hardware bindings that drive the focused
-// tab, or every synced tab when input sync is on. Hidden tabs keep running without drawing.
 import type { Suite } from '../emulator';
 import type { TextRequest } from '../midp/platform';
 import type { AudioEngine } from './audio';
@@ -22,9 +19,7 @@ export interface WorkspaceServices {
   bridge(): string;
   log(line: string, err?: boolean): void;
   editText(req: TextRequest): Promise<{ text: string; command: number } | null>;
-  /** Persists an app entry whose settings changed (keypad layout edits). */
   saveApp(app: AppEntry): void;
-  /** Tabs were added, removed, focused or changed state. */
   changed(): void;
   closeRequested(s: Session): void;
 }
@@ -37,18 +32,14 @@ export class Workspace {
   sessions: Session[] = [];
   focused: Session | null = null;
   view: ViewMode = 'single';
-  /** Mirror input to every tab whose `sync` flag is set. */
   syncInput = false;
-  /** Keep drawing tabs that are not on screen. */
   drawHidden = false;
-  /** Only the focused tab makes sound. */
   soundFocusedOnly = true;
   onEditSelection: (item: string | null) => void = () => {};
 
   private keypad: Keypad;
   private keypadVisible = false;
   private keypadOverride: boolean | null = null;
-  /** MIDP key codes held by hardware input, with the number of bindings holding each. */
   private hwHeld = new Map<number, number>();
   private kbDown = new Map<string, number>();
   private padHeld = new Set<string>();
@@ -56,7 +47,6 @@ export class Workspace {
   private bindings = new Map<string, number>();
   private fpsTimer: ReturnType<typeof setInterval>;
   private wakeLock: any = null;
-  /** Sessions that received the keys currently held (so releases reach the same tabs). */
   private keyTargets = new Map<number, Session[]>();
 
   constructor(private ui: WorkspaceUI, private svc: WorkspaceServices) {
@@ -89,7 +79,6 @@ export class Workspace {
   get keypadShown(): boolean { return this.keypadVisible; }
   get editing(): boolean { return this.keypad.isEditing; }
 
-  // ---------------------------------------------------------------- tabs
   open(app: AppEntry, suite: Suite, boot: Map<string, Uint8Array>, midletIndex: number, slot: number, via: string): Session {
     const s = new Session({
       engine: this.svc.engine,
@@ -181,7 +170,6 @@ export class Workspace {
     this.applyVisibility();
   }
 
-  /** False while another page (the library) covers the workspace: every tab runs hidden. */
   shown = true;
 
   setShown(on: boolean): void {
@@ -191,7 +179,6 @@ export class Workspace {
     if (on) this.layout();
   }
 
-  /** Which tiles are on screen, which tabs draw, which make sound. */
   private applyVisibility(): void {
     for (const s of this.sessions) {
       const visible = this.shown && (this.view === 'grid' || s === this.focused);
@@ -200,7 +187,6 @@ export class Workspace {
     }
   }
 
-  /** Re-applies the focused tab's settings that do not need a restart. */
   applySettings(): void {
     const s = this.settings;
     if (!s) return;
@@ -224,7 +210,6 @@ export class Workspace {
     return this.keypadVisible;
   }
 
-  // ---------------------------------------------------------------- layout
   layout(): void {
     const { body, keypad, stage } = this.ui;
     const bw = body.clientWidth, bh = body.clientHeight;
@@ -233,7 +218,6 @@ export class Workspace {
     const W = f?.canvas.width || 240, H = f?.canvas.height || 320;
     let mode: 'none' | 'portrait' | 'landscape' = 'none';
     if (this.keypadVisible && f) {
-      // below the screen when that leaves enough room, otherwise over the sides of the stage
       const fitBelow = Math.min(bw / W, (bh * 0.58) / H);
       mode = bw / bh > 0.82 || fitBelow * W < bw * 0.45 ? 'landscape' : 'portrait';
     }
@@ -252,7 +236,6 @@ export class Workspace {
     if (!aw || !ah) return;
     const visible = this.sessions.filter((s) => s.visible);
     if (this.view === 'grid' && visible.length > 1) {
-      // choose the column count that gives the biggest screens
       let best = { cols: 1, scale: 0 };
       for (let cols = 1; cols <= visible.length; cols++) {
         const rows = Math.ceil(visible.length / cols);
@@ -271,7 +254,6 @@ export class Workspace {
     }
   }
 
-  // ---------------------------------------------------------------- keypad layout editing
   setEditing(on: boolean): void {
     if (on && !this.focused) return;
     if (on && !this.keypadVisible) { this.keypadVisible = true; this.keypadOverride = true; }
@@ -285,8 +267,6 @@ export class Workspace {
   resizeSelected(delta: number): void { this.keypad.resizeSelected(delta); }
   resetLayout(): void { this.keypad.resetLayout(); }
 
-  // ---------------------------------------------------------------- input routing
-  /** Tabs that receive input now: the focused one, plus every synced tab when sync is on. */
   private targets(): Session[] {
     const f = this.focused;
     if (!f) return [];
@@ -307,7 +287,6 @@ export class Workspace {
     for (const s of t) s.keyUp(code);
   }
 
-  /** Repeat of a held key (keyboard auto-repeat): goes to the tabs that got the press. */
   private repeat(code: number): void {
     for (const s of this.keyTargets.get(code) ?? this.targets()) s.keyDown(code);
   }
@@ -388,7 +367,6 @@ export class Workspace {
     this.padRaf = requestAnimationFrame(tick);
   }
 
-  // ---------------------------------------------------------------- device integration
   private async acquireWakeLock(): Promise<void> {
     if (this.wakeLock || !this.sessions.length) return;
     try {
@@ -418,7 +396,6 @@ export class Workspace {
       const o = this.settings?.orientation;
       if (o && o !== 'auto') await (screen.orientation as any)?.lock?.(o);
     } catch {
-      /* not supported (iOS Safari, desktop orientation lock) */
     }
   }
 
@@ -426,7 +403,7 @@ export class Workspace {
     try {
       (screen.orientation as any)?.unlock?.();
       if (document.fullscreenElement) await document.exitFullscreen();
-    } catch { /* ignore */ }
+    } catch {  }
   }
 
   dispose(): void { clearInterval(this.fpsTimer); }

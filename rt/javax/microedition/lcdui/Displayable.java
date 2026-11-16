@@ -35,13 +35,11 @@ public abstract class Displayable {
 
     void repaintIfShown() { if (shown) Display.requestRepaint(); }
 
-    /** Commands to show on the soft keys (may include item commands). */
     Vector softCommands() { return commands; }
     void fireCommand(Command c) {
         if (listener != null) listener.commandAction(c, this);
     }
 
-    // hooks driven by Display / EventLoop
     abstract void paint0(Graphics g);
     void keyEvent0(int type, int keyCode) {}
     void pointerEvent0(int type, int x, int y) {}

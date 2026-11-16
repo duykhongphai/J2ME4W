@@ -2,7 +2,6 @@ package javax.microedition.lcdui;
 
 import java.util.Vector;
 
-/** Shared element storage for List and ChoiceGroup. */
 final class ChoiceModel {
     final int type;
     final Vector strings = new Vector();

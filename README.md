@@ -7,6 +7,10 @@ browser.
 *Chạy game/ứng dụng J2ME (MIDP 2.0 / CLDC 1.1) ngay trên trình duyệt, bằng một máy ảo Java viết bằng
 TypeScript. File JAR không bị tải lên đâu cả.*
 
+**Web demo: https://duykhongphai.github.io/J2ME4W/** (offline games; online games need the network
+bridge from `npm start`, see [Online games](#online-games-network-proxy)). Every push to `main`
+redeploys it through [.github/workflows/pages.yml](.github/workflows/pages.yml).
+
 ## Quick start
 
 Requirements: Node 18+ and a JDK 11+ (`javac`, `jar`, `java` on `PATH`). The JDK is only used at

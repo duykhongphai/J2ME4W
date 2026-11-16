@@ -1,11 +1,3 @@
-// WebAudio backend for javax.microedition.media.
-//  - WAV / MP3 / OGG / AAC: decodeAudioData + AudioBufferSourceNode.
-//  - MIDI: a small General MIDI synth (oscillator voices per instrument family, ADSR envelopes,
-//    synthesized drums on channel 10) driven by a look-ahead scheduler, so long songs and loops
-//    cost little and loop without gaps.
-//  - Tones and MIDP tone sequences: square-wave voices.
-// Everything goes through one master gain + compressor, which gives a global volume and keeps
-// many simultaneous voices from clipping.
 import type { AudioHost } from '../midp/platform';
 import { parseMidi, type MidiNote } from './midi';
 
@@ -15,12 +7,10 @@ interface Clip {
   decoding: Promise<void> | null;
   midi: MidiNote[] | null;
   tones: MidiNote[] | null;
-  /** seconds */
   length: number;
   sources: AudioScheduledSourceNode[];
   gain: GainNode | null;
   volume: number;
-  /** AudioContext time at which media time 0 of the current pass happened. */
   origin: number;
   offset: number;
   playing: boolean;
@@ -31,32 +21,30 @@ interface Clip {
   next: number;
 }
 
-/** Voice parameters per General MIDI instrument family (program >> 3). */
 interface Patch { wave: OscillatorType; a: number; d: number; s: number; r: number; cutoff: number; gain: number; detune?: number }
 const PATCHES: Patch[] = [
-  { wave: 'triangle', a: 0.004, d: 0.6, s: 0.25, r: 0.25, cutoff: 5000, gain: 0.9 }, // piano
-  { wave: 'sine', a: 0.002, d: 0.35, s: 0.05, r: 0.25, cutoff: 8000, gain: 0.8 }, // chromatic percussion
-  { wave: 'square', a: 0.01, d: 0.1, s: 0.8, r: 0.08, cutoff: 2200, gain: 0.45 }, // organ
-  { wave: 'sawtooth', a: 0.004, d: 0.5, s: 0.15, r: 0.2, cutoff: 2000, gain: 0.55 }, // guitar
-  { wave: 'triangle', a: 0.004, d: 0.3, s: 0.6, r: 0.1, cutoff: 1200, gain: 1.0 }, // bass
-  { wave: 'sawtooth', a: 0.08, d: 0.2, s: 0.8, r: 0.3, cutoff: 2600, gain: 0.45, detune: 6 }, // strings
-  { wave: 'sawtooth', a: 0.06, d: 0.2, s: 0.8, r: 0.35, cutoff: 2400, gain: 0.45, detune: 8 }, // ensemble
-  { wave: 'sawtooth', a: 0.03, d: 0.15, s: 0.75, r: 0.15, cutoff: 3000, gain: 0.5 }, // brass
-  { wave: 'square', a: 0.03, d: 0.1, s: 0.75, r: 0.12, cutoff: 2600, gain: 0.45 }, // reed
-  { wave: 'sine', a: 0.04, d: 0.1, s: 0.85, r: 0.15, cutoff: 6000, gain: 0.8 }, // pipe
-  { wave: 'square', a: 0.005, d: 0.1, s: 0.8, r: 0.1, cutoff: 4000, gain: 0.45 }, // synth lead
-  { wave: 'sawtooth', a: 0.25, d: 0.3, s: 0.85, r: 0.5, cutoff: 1500, gain: 0.45, detune: 10 }, // synth pad
-  { wave: 'triangle', a: 0.05, d: 0.3, s: 0.6, r: 0.4, cutoff: 3000, gain: 0.6 }, // synth fx
-  { wave: 'triangle', a: 0.004, d: 0.4, s: 0.2, r: 0.2, cutoff: 4000, gain: 0.8 }, // ethnic
-  { wave: 'sine', a: 0.002, d: 0.25, s: 0.0, r: 0.15, cutoff: 6000, gain: 0.9 }, // percussive
-  { wave: 'sawtooth', a: 0.01, d: 0.3, s: 0.3, r: 0.3, cutoff: 1800, gain: 0.4 }, // sound fx
+  { wave: 'triangle', a: 0.004, d: 0.6, s: 0.25, r: 0.25, cutoff: 5000, gain: 0.9 },
+  { wave: 'sine', a: 0.002, d: 0.35, s: 0.05, r: 0.25, cutoff: 8000, gain: 0.8 },
+  { wave: 'square', a: 0.01, d: 0.1, s: 0.8, r: 0.08, cutoff: 2200, gain: 0.45 },
+  { wave: 'sawtooth', a: 0.004, d: 0.5, s: 0.15, r: 0.2, cutoff: 2000, gain: 0.55 },
+  { wave: 'triangle', a: 0.004, d: 0.3, s: 0.6, r: 0.1, cutoff: 1200, gain: 1.0 },
+  { wave: 'sawtooth', a: 0.08, d: 0.2, s: 0.8, r: 0.3, cutoff: 2600, gain: 0.45, detune: 6 },
+  { wave: 'sawtooth', a: 0.06, d: 0.2, s: 0.8, r: 0.35, cutoff: 2400, gain: 0.45, detune: 8 },
+  { wave: 'sawtooth', a: 0.03, d: 0.15, s: 0.75, r: 0.15, cutoff: 3000, gain: 0.5 },
+  { wave: 'square', a: 0.03, d: 0.1, s: 0.75, r: 0.12, cutoff: 2600, gain: 0.45 },
+  { wave: 'sine', a: 0.04, d: 0.1, s: 0.85, r: 0.15, cutoff: 6000, gain: 0.8 },
+  { wave: 'square', a: 0.005, d: 0.1, s: 0.8, r: 0.1, cutoff: 4000, gain: 0.45 },
+  { wave: 'sawtooth', a: 0.25, d: 0.3, s: 0.85, r: 0.5, cutoff: 1500, gain: 0.45, detune: 10 },
+  { wave: 'triangle', a: 0.05, d: 0.3, s: 0.6, r: 0.4, cutoff: 3000, gain: 0.6 },
+  { wave: 'triangle', a: 0.004, d: 0.4, s: 0.2, r: 0.2, cutoff: 4000, gain: 0.8 },
+  { wave: 'sine', a: 0.002, d: 0.25, s: 0.0, r: 0.15, cutoff: 6000, gain: 0.9 },
+  { wave: 'sawtooth', a: 0.01, d: 0.3, s: 0.3, r: 0.3, cutoff: 1800, gain: 0.4 },
 ];
 const TONE_PATCH: Patch = { wave: 'square', a: 0.003, d: 0.05, s: 0.9, r: 0.03, cutoff: 6000, gain: 0.5 };
 
 const LOOKAHEAD = 0.35;
 const TICK_MS = 60;
 
-/** One AudioContext for the whole page: master volume, compressor, shared noise buffer. */
 export class AudioEngine {
   ctx: AudioContext | null = null;
   master: GainNode | null = null;
@@ -66,7 +54,6 @@ export class AudioEngine {
   log: (msg: string) => void = () => {};
   private warned = new Set<string>();
 
-  /** Must run from a user gesture at least once (autoplay policy). */
   unlock(): void {
     const c = this.audio();
     if (c && c.state === 'suspended') void c.resume();
@@ -102,7 +89,6 @@ export class AudioEngine {
   setMuted(m: boolean): void { this.muted = m; this.applyMaster(); }
   setVolume(v: number): void { this.masterVolume = Math.max(0, Math.min(1, v)); this.applyMaster(); }
 
-  /** Pauses all output while the page is hidden. */
   setSuspended(s: boolean): void {
     const c = this.ctx;
     if (!c) return;
@@ -116,7 +102,6 @@ export class AudioEngine {
   }
 }
 
-/** Audio for one running MIDlet (players are numbered per VM, so every session needs its own). */
 export class WebAudioHost implements AudioHost {
   private clips = new Map<number, Clip>();
   private out: GainNode | null = null;
@@ -139,7 +124,6 @@ export class WebAudioHost implements AudioHost {
 
   unlock(): void { this.engine.unlock(); }
 
-  /** Silences this session only (e.g. background tabs). */
   setSessionMuted(m: boolean): void {
     this.sessionMuted = m;
     if (this.out && this.ctx) this.out.gain.setTargetAtTime(m ? 0 : 1, this.ctx.currentTime, 0.03);
@@ -147,7 +131,6 @@ export class WebAudioHost implements AudioHost {
 
   private warn(key: string, msg: string): void { this.engine.warn(key, msg); }
 
-  // ---------------------------------------------------------------- AudioHost
   create(handle: number, data: Uint8Array | null, type: string): void {
     const clip: Clip = {
       type: type.toLowerCase(), buffer: null, decoding: null, midi: null, tones: null, length: 0,
@@ -215,12 +198,10 @@ export class WebAudioHost implements AudioHost {
       while (clip.next < notes.length && notes[clip.next].end <= clip.offset) clip.next++;
       this.schedule(clip, gen);
     } else {
-      // undecodable: behave like a silent clip of unknown length
       this.after(clip, gen, 0.05);
     }
   }
 
-  /** Look-ahead scheduler for note-based clips. */
   private schedule(clip: Clip, gen: number): void {
     if (gen !== clip.generation || !clip.playing) return;
     const ctx = this.ctx!;
@@ -233,7 +214,6 @@ export class WebAudioHost implements AudioHost {
       if (clip.midi && n.channel === 9) this.drum(clip, n.note, n.velocity * n.volume, start);
       else this.voice(clip, clip.midi ? PATCHES[n.program >> 3] : TONE_PATCH, n, start, dur);
     }
-    // prune finished sources
     if (clip.sources.length > 256) clip.sources = clip.sources.slice(-128);
     if (clip.next >= notes.length && ctx.currentTime - clip.origin >= clip.length) {
       this.passDone(clip, gen);
@@ -297,7 +277,7 @@ export class WebAudioHost implements AudioHost {
     if (v <= 0.002) return;
     const out = ctx.createGain();
     out.connect(clip.gain!);
-    if (note === 35 || note === 36) { // kick
+    if (note === 35 || note === 36) {
       const o = ctx.createOscillator();
       o.frequency.setValueAtTime(140, t);
       o.frequency.exponentialRampToValueAtTime(45, t + 0.12);
@@ -309,7 +289,7 @@ export class WebAudioHost implements AudioHost {
       clip.sources.push(o);
       return;
     }
-    if (note >= 41 && note <= 50 && note !== 42 && note !== 44 && note !== 46 && note !== 49) { // toms
+    if (note >= 41 && note <= 50 && note !== 42 && note !== 44 && note !== 46 && note !== 49) {
       const o = ctx.createOscillator();
       const f = 80 + (note - 41) * 22;
       o.frequency.setValueAtTime(f * 1.6, t);
@@ -322,7 +302,6 @@ export class WebAudioHost implements AudioHost {
       clip.sources.push(o);
       return;
     }
-    // noise-based: snare, hats, cymbals, everything else
     const src = ctx.createBufferSource();
     src.buffer = this.noise;
     const f = ctx.createBiquadFilter();
@@ -345,12 +324,11 @@ export class WebAudioHost implements AudioHost {
     if (clip.timer) { clearTimeout(clip.timer); clip.timer = null; }
     const now = this.ctx?.currentTime ?? 0;
     if (clip.gain) {
-      // short fade instead of a click, then drop the voices
       clip.gain.gain.setTargetAtTime(0, now, 0.01);
       const g = clip.gain;
       const srcs = clip.sources;
       setTimeout(() => {
-        for (const s of srcs) { try { s.stop(); } catch { /* already stopped */ } }
+        for (const s of srcs) { try { s.stop(); } catch {  } }
         g.disconnect();
       }, 60);
       clip.gain = null;
@@ -429,7 +407,6 @@ export class WebAudioHost implements AudioHost {
     for (const h of [...this.clips.keys()]) this.close(h);
   }
 
-  /** Stops everything and detaches this session from the engine. */
   dispose(): void {
     this.closeAll();
     this.out?.disconnect();
@@ -438,21 +415,20 @@ export class WebAudioHost implements AudioHost {
 }
 
 function isMidi(data: Uint8Array, _type: string): boolean {
-  return data[0] === 0x4d && data[1] === 0x54 && data[2] === 0x68 && data[3] === 0x64; // "MThd"
+  return data[0] === 0x4d && data[1] === 0x54 && data[2] === 0x68 && data[3] === 0x64;
 }
 
-/** Parses a MIDP ToneControl sequence into timed notes. */
 export function parseToneSequence(seq: Uint8Array): MidiNote[] {
   const s = Array.from(seq, (v) => (v << 24) >> 24);
   let i = 0;
   let tempo = 120, resolution = 64;
   const blocks = new Map<number, number[]>();
   const main: number[] = [];
-  if (s[i] === -2) i += 2; // VERSION
+  if (s[i] === -2) i += 2;
   if (s[i] === -3) { tempo = (s[i + 1] & 0xff) * 4; i += 2; }
   if (s[i] === -4) { resolution = s[i + 1] & 0xff; i += 2; }
   while (i + 1 < s.length) {
-    if (s[i] === -5) { // BLOCK_START
+    if (s[i] === -5) {
       const id = s[i + 1];
       i += 2;
       const body: number[] = [];
@@ -472,13 +448,13 @@ export function parseToneSequence(seq: Uint8Array): MidiNote[] {
     for (let k = 0; k + 1 < ev.length; k += 2) {
       const a = ev[k], d = ev[k + 1] & 0xff;
       if (a === -7) { if (depth < 8) play(blocks.get(ev[k + 1]) ?? [], depth + 1); }
-      else if (a === -9) { // REPEAT: the next note is repeated d times
+      else if (a === -9) {
         const n = ev[k + 2], dur = (ev[k + 3] & 0xff) * unit;
         for (let r = 0; r < d; r++) { if (n >= 0) out.push(note(n, t, dur, vol)); t += dur; }
         k += 2;
       } else if (a === -8) vol = d / 100;
       else if (a >= 0) { out.push(note(a, t, d * unit, vol)); t += d * unit; }
-      else if (a === -1) t += d * unit; // SILENCE
+      else if (a === -1) t += d * unit;
     }
   };
   const note = (n: number, start: number, dur: number, v: number): MidiNote =>

@@ -1,6 +1,5 @@
 package java.lang;
 
-/** String contents live in a hidden JS string on the VM object; every operation is native. */
 public final class String {
     public String() { init0(""); }
     public String(String s) { init0(s.toString()); }

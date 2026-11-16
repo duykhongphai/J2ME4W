@@ -1,4 +1,3 @@
-// Natives for j2me4w.net.Net: blocking Java socket/HTTP calls on top of the host's async NetHost.
 import type { JArray, JObject, JThread } from '../vm/model';
 import { SUSPEND, type VM } from '../vm/vm';
 import type { NetSocket, Platform } from './platform';
@@ -32,7 +31,6 @@ export function registerNetNatives(vm: VM, p: Platform): void {
     return n;
   };
 
-  /** Wakes a reader blocked in read0 if it can make progress. */
   const service = (s: Sock) => {
     const r = s.reader;
     if (!r) return;

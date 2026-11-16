@@ -1,6 +1,3 @@
-// Synchronous PNG decoder (all color types, bit depths, tRNS and Adam7 interlacing).
-// Synchronous decoding lets Image.createImage() return immediately and gives exact pixels
-// (no browser color management), which matters for getRGB()-based games.
 import { inflateSync, unzlibSync } from 'fflate';
 import { Surface } from './surface';
 
@@ -56,7 +53,6 @@ export function decodePng(data: Uint8Array): Surface | null {
   const px = out.px;
   const maxV = (1 << depth) - 1;
 
-  // transparency key
   let keyGray = -1, keyR = -1, keyG = -1, keyB = -1;
   if (trns && ctype === 0 && trns.length >= 2) keyGray = (trns[0] << 8) | trns[1];
   if (trns && ctype === 2 && trns.length >= 6) {
@@ -100,7 +96,6 @@ export function decodePng(data: Uint8Array): Surface | null {
           } else if (ctype === 4) { R = G = B = cur[i]; A = cur[i + 1]; }
           else { R = cur[i]; G = cur[i + 1]; B = cur[i + 2]; A = cur[i + 3]; }
         } else {
-          // 1, 2, 4 bit gray or palette
           const bit = c * depth;
           const v = (cur[bit >> 3] >> (8 - depth - (bit & 7))) & maxV;
           if (ctype === 3) {

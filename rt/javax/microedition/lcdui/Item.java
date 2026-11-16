@@ -68,9 +68,7 @@ public abstract class Item {
     abstract int contentHeight(int w);
     abstract void paintContent(Graphics g, int x, int y, int w, boolean focused);
     boolean focusable() { return !commands.isEmpty(); }
-    /** Returns true when the item consumed the key. */
     boolean itemKey(int action, int keyCode) { return false; }
-    /** Tap at (x, y) relative to the item's top-left (label included). */
     void itemPointer(int x, int y, int w) { activate(); }
 
     void activate() {

@@ -112,13 +112,12 @@ public class Sprite extends Layer {
         else { width = frameW; height = frameH; }
     }
 
-    /** Transformed x of a point inside the untransformed frame. */
     private int tx(int px, int py) {
         switch (transform) {
             case TRANS_NONE: case TRANS_MIRROR_ROT180: return px;
             case TRANS_MIRROR: case TRANS_ROT180: return frameW - 1 - px;
             case TRANS_ROT90: case TRANS_MIRROR_ROT90: return frameH - 1 - py;
-            default: return py; // ROT270, MIRROR_ROT270
+            default: return py;
         }
     }
     private int ty(int px, int py) {
@@ -126,7 +125,7 @@ public class Sprite extends Layer {
             case TRANS_NONE: case TRANS_MIRROR: return py;
             case TRANS_MIRROR_ROT180: case TRANS_ROT180: return frameH - 1 - py;
             case TRANS_ROT90: case TRANS_MIRROR_ROT270: return px;
-            default: return frameW - 1 - px; // ROT270, MIRROR_ROT90
+            default: return frameW - 1 - px;
         }
     }
 
@@ -135,7 +134,6 @@ public class Sprite extends Layer {
         colX = x; colY = y; colW = width; colH = height;
     }
 
-    /** Collision rectangle in screen coordinates: {x, y, w, h}. */
     private void colRect(int[] r) {
         int x1 = tx(colX, colY), y1 = ty(colX, colY);
         int x2 = tx(colX + colW - 1, colY + colH - 1), y2 = ty(colX + colW - 1, colY + colH - 1);
@@ -154,7 +152,6 @@ public class Sprite extends Layer {
         return true;
     }
 
-    /** Fills opaque flags for the area (sx,sy,w,h) in screen coords. */
     private boolean[] opaqueMask(int sx, int sy, int w, int h) {
         Image frame = Image.createImage(image, (sequence[seqIndex] % cols) * frameW, (sequence[seqIndex] / cols) * frameH, frameW, frameH, transform);
         int[] px = new int[w * h];

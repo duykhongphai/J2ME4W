@@ -3,23 +3,17 @@ import java.awt.image.IndexColorModel;
 import java.io.File;
 import javax.imageio.ImageIO;
 
-/**
- * Writes test PNGs with known pixels using the JDK's encoder (independent of our decoder).
- * Usage: java scripts/GenPng.java <outdir>
- */
 public class GenPng {
     public static void main(String[] args) throws Exception {
         File dir = new File(args[0]);
         dir.mkdirs();
 
-        // 4x3 RGBA with varied alpha
         BufferedImage rgba = new BufferedImage(4, 3, BufferedImage.TYPE_INT_ARGB);
         for (int y = 0; y < 3; y++)
             for (int x = 0; x < 4; x++)
                 rgba.setRGB(x, y, ((x * 80) << 24) | ((x * 60) << 16) | ((y * 100) << 8) | (x + y * 4) * 10);
         ImageIO.write(rgba, "png", new File(dir, "rgba.png"));
 
-        // 3x2 palette image with a transparent entry
         byte[] r = { (byte) 255, 0, 0, 10 }, g = { 0, (byte) 255, 0, 20 }, b = { 0, 0, (byte) 255, 30 }, a = { (byte) 255, (byte) 255, (byte) 128, 0 };
         IndexColorModel cm = new IndexColorModel(2, 4, r, g, b, a);
         BufferedImage pal = new BufferedImage(3, 2, BufferedImage.TYPE_BYTE_BINARY, cm);
@@ -27,12 +21,10 @@ public class GenPng {
         for (int i = 0; i < 6; i++) pal.getRaster().setSample(i % 3, i / 3, 0, idx[i]);
         ImageIO.write(pal, "png", new File(dir, "pal.png"));
 
-        // 5x1 grayscale
         BufferedImage gray = new BufferedImage(5, 1, BufferedImage.TYPE_BYTE_GRAY);
         for (int x = 0; x < 5; x++) gray.getRaster().setSample(x, 0, 0, x * 60);
         ImageIO.write(gray, "png", new File(dir, "gray.png"));
 
-        // 16x16 sprite: opaque yellow square with transparent border, for the demo
         BufferedImage spr = new BufferedImage(16, 16, BufferedImage.TYPE_INT_ARGB);
         for (int y = 0; y < 16; y++)
             for (int x = 0; x < 16; x++) {

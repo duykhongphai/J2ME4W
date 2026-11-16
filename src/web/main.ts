@@ -1,4 +1,3 @@
-// App shell: game library (IndexedDB), import, per-app settings, and the multi-tab workspace.
 import './style.css';
 import { loadSuite, unzip, type Suite } from '../emulator';
 import { AudioEngine } from './audio';
@@ -13,14 +12,13 @@ import {
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 
-// ------------------------------------------------------------------ globals
 const GLOBAL_KEY = 'j2me4w:global';
 const global = (() => {
   const defaults = { proxy: '', muted: false, volume: 80, drawHidden: false, soundFocusedOnly: true };
   try { return { ...defaults, ...JSON.parse(localStorage.getItem(GLOBAL_KEY) ?? '{}') }; }
   catch { return defaults; }
 })();
-const saveGlobal = () => { try { localStorage.setItem(GLOBAL_KEY, JSON.stringify(global)); } catch { /* ignore */ } };
+const saveGlobal = () => { try { localStorage.setItem(GLOBAL_KEY, JSON.stringify(global)); } catch {  } };
 
 const store = new AppStore();
 const engine = new AudioEngine();
@@ -62,7 +60,6 @@ async function runtime(): Promise<Map<string, Uint8Array>> {
   return rt;
 }
 
-// ------------------------------------------------------------------ dialogs
 function dialogResult(d: HTMLDialogElement): Promise<string> {
   return new Promise((resolve) => {
     d.returnValue = '';
@@ -96,11 +93,6 @@ async function promptBox(text: string, value: string): Promise<string | null> {
   return (await dialogResult(d)) === 'ok' ? input.value.trim() : null;
 }
 
-/**
- * Text entry for TextBox / TextField: a real input the user types into with the PC keyboard or the
- * phone's own keyboard. The screen's commands appear as buttons; Enter picks the first positive one.
- * Requests from several tabs are queued (one dialog at a time).
- */
 let textQueue: Promise<unknown> = Promise.resolve();
 const NEGATIVE = '\u0001';
 function editText(req: TextRequest): Promise<{ text: string; command: number } | null> {
@@ -131,7 +123,6 @@ function editText(req: TextRequest): Promise<{ text: string; command: number } |
       else if (kind === 5) input.value = input.value.replace(/[^\d.,-]/g, '');
       count();
     };
-    // the game's commands, positive ones first; Enter triggers the first positive command
     const box = $('textCommands');
     box.innerHTML = '';
     const cmds = req.commands.map((label, index) => ({ label: label.replace(NEGATIVE, ''), index, negative: label.startsWith(NEGATIVE) }));
@@ -177,7 +168,6 @@ $('textReveal').addEventListener('click', () => {
   line.focus();
 });
 
-// ------------------------------------------------------------------ workspace
 const ws = new Workspace({
   root: playerView,
   body: $('playerBody'),
@@ -193,7 +183,7 @@ const ws = new Workspace({
   changed: () => { renderTabs(); syncPlayerButtons(); updateRunningBar(); },
   closeRequested: (s) => void closeTab(s),
 });
-if ((import.meta as any).env?.DEV) (window as any).__ws = ws; // inspection from tests
+if ((import.meta as any).env?.DEV) (window as any).__ws = ws;
 ws.setDrawHidden(!!global.drawHidden);
 ws.setSoundFocusedOnly(global.soundFocusedOnly !== false);
 
@@ -249,7 +239,6 @@ volumeInput.addEventListener('input', () => {
   syncPlayerButtons();
 });
 
-// ---- tab strip (bar + menu sheet)
 function tabChip(s: Session, compact: boolean): HTMLElement {
   const b = document.createElement('div');
   b.className = 'tab-chip';
@@ -298,7 +287,6 @@ function updateRunningBar() {
   $('runningText').textContent = n === 1 ? `${ws.sessions[0].title} is running` : `${n} games running`;
 }
 
-// ---- views
 function showPlayer() {
   libraryView.hidden = true;
   playerView.hidden = false;
@@ -325,7 +313,6 @@ function showLibrary(picker = false) {
   updateRunningBar();
 }
 
-/** Leaves the workspace for the library; games keep running in the background. */
 function toLibrary(picker = false) {
   if (playerView.hidden) { setPicker(picker); return; }
   if (history.state?.view === 'player') {
@@ -364,7 +351,6 @@ function freeSlot(app: AppEntry): number {
   return slot;
 }
 
-/** Opens `app`: switches to its running tab, or starts it in a new tab. */
 async function launch(app: AppEntry, newTab = false) {
   engine.unlock();
   if (!newTab && !pickerMode) {
@@ -423,7 +409,6 @@ function openMenu() {
   (menuSheet.querySelector('.sheet-item') as HTMLElement).focus();
 }
 
-// ---- per-tab settings
 async function openTabDialog(s: Session) {
   const d = $<HTMLDialogElement>('tabDialog');
   $('tabDialogTitle').textContent = s.title;
@@ -458,7 +443,6 @@ async function openTabDialog(s: Session) {
   renderTabs();
 }
 
-// ---- keypad layout editing
 ws.onEditSelection = (item) => {
   $('editTarget').textContent = item ? ITEM_NAMES[item] ?? item : 'Select a key group';
 };
@@ -486,11 +470,9 @@ editBar.addEventListener('click', (e) => {
 window.addEventListener('popstate', () => {
   if (exiting) { exiting = false; return; }
   if (playerView.hidden) {
-    // back from the library returns to running games, if any
     if (ws.sessions.length && history.state?.view === 'player') showPlayer();
     return;
   }
-  // Android back: leave edit mode, then open the menu; back on the menu goes to the library
   if (ws.editing) {
     history.pushState({ view: 'player' }, '');
     stopEditing();
@@ -565,9 +547,8 @@ $('kbBtn').addEventListener('click', () => { ws.toggleKeypad(); if (!ws.keypadSh
 $('soundBtn').addEventListener('click', () => setMuted(!engine.muted));
 document.addEventListener('fullscreenchange', () => { syncPlayerButtons(); ws.layout(); });
 
-// hardware keyboard
 window.addEventListener('keydown', (e) => {
-  if (capture) return; // a binding is being recorded
+  if (capture) return;
   if (document.querySelector('dialog[open]')) return;
   const t = e.target as HTMLElement;
   if (t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA')) return;
@@ -582,7 +563,6 @@ window.addEventListener('keydown', (e) => {
     if (e.key === '-') ws.resizeSelected(-0.1);
     return;
   }
-  // Alt+1..9 switches tabs, Alt+G toggles the grid, Alt+S toggles input sync
   if (e.altKey && !e.ctrlKey && !e.metaKey) {
     if (/^Digit[1-9]$/.test(e.code)) { e.preventDefault(); ws.focusIndex(Number(e.code.slice(5)) - 1); return; }
     if (e.code === 'KeyG') { e.preventDefault(); toggleView(); return; }
@@ -595,17 +575,15 @@ window.addEventListener('keydown', (e) => {
 window.addEventListener('keyup', (e) => { if (!playerView.hidden && ws.keyUp(e)) e.preventDefault(); });
 window.addEventListener('blur', () => ws.releaseKeys());
 
-// ------------------------------------------------------------------ settings dialog
 const settingsDialog = $<HTMLDialogElement>('settingsDialog');
 const form = $<HTMLFormElement>('settingsForm');
 const field = <T extends HTMLElement = HTMLInputElement>(name: string) => form.elements.namedItem(name) as unknown as T;
-/** Settings being edited (bindings and layouts change here before Save). */
 let draft: AppSettings = { ...DEFAULT_SETTINGS };
 
 function selectTab(name: string) {
   for (const t of form.querySelectorAll<HTMLElement>('.tab')) t.setAttribute('aria-selected', String(t.dataset.tab === name));
   for (const p of form.querySelectorAll<HTMLElement>('.tab-panel')) p.hidden = p.dataset.panel !== name;
-  try { localStorage.setItem('j2me4w:settingsTab', name); } catch { /* ignore */ }
+  try { localStorage.setItem('j2me4w:settingsTab', name); } catch {  }
 }
 form.querySelector('.tabs')!.addEventListener('click', (e) => {
   const tab = (e.target as HTMLElement).closest<HTMLElement>('.tab');
@@ -648,7 +626,6 @@ function fillSettings(s: AppSettings) {
 
 function readSettings(): AppSettings {
   const num = (n: string) => Math.max(0, Math.min(48, parseInt(field(n).value, 10) || 0));
-  // the width/height inputs always hold the chosen size (presets, "match device" and swap fill them)
   const w = Math.max(64, Math.min(1024, parseInt(field('width').value, 10) || 240));
   const h = Math.max(64, Math.min(1024, parseInt(field('height').value, 10) || 320));
   return {
@@ -681,7 +658,6 @@ function renderLayoutSummary() {
 }
 $('resetLayouts').addEventListener('click', () => { draft.keyLayouts = {}; renderLayoutSummary(); });
 
-// ---- controls (bindings) editor
 let capture: { code: number; cancel: () => void } | null = null;
 
 function renderBindings() {
@@ -727,7 +703,6 @@ function setBindings(code: number, list: string[]) {
 }
 
 function assign(code: number, binding: string) {
-  // a binding drives one phone key: take it away from any other key first
   const next = { ...draft.bindings };
   for (const k of MIDP_KEYS) {
     if (k.code === code) continue;
@@ -770,14 +745,12 @@ function startCapture(code: number, btn: HTMLElement) {
 $('resetBindings').addEventListener('click', () => { capture?.cancel(); draft.bindings = {}; renderBindings(); });
 settingsDialog.addEventListener('close', () => capture?.cancel());
 
-/** A screen size with the same shape as this device's viewport, 240 px on the short side. */
 function deviceSize(): [number, number] {
   const vw = window.innerWidth, vh = window.innerHeight;
   const clamp = (v: number) => Math.max(240, Math.min(480, Math.round(v / 2) * 2));
   return vh >= vw ? [240, clamp((240 * vh) / vw)] : [clamp((240 * vw) / vh), 240];
 }
 
-/** Selects the preset matching width x height (or Custom) and describes the size. */
 function syncSizeUI(fromPreset = false) {
   const sel = field<HTMLSelectElement>('preset');
   const w = parseInt(field('width').value, 10) || 0, h = parseInt(field('height').value, 10) || 0;
@@ -821,7 +794,7 @@ async function openSettings(app: AppEntry) {
   $('settingsTitle').textContent = app.name;
   fillSettings(app.settings);
   let tab = 'display';
-  try { tab = localStorage.getItem('j2me4w:settingsTab') ?? 'display'; } catch { /* ignore */ }
+  try { tab = localStorage.getItem('j2me4w:settingsTab') ?? 'display'; } catch {  }
   selectTab(tab);
   ws.releaseKeys();
   for (;;) {
@@ -853,7 +826,6 @@ async function openSettings(app: AppEntry) {
   renderLibrary();
 }
 
-// ------------------------------------------------------------------ library
 function formatSize(n: number) {
   return n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`;
 }
@@ -1003,7 +975,6 @@ async function installFiles(files: FileList | File[]) {
   }
   renderLibrary();
   if (installed && jars.length === 1 && playerView.hidden) {
-    // one game added: start it right away, like J2ME-Loader does after installing
     void launch(installed, pickerMode);
   }
 }
@@ -1033,7 +1004,7 @@ document.addEventListener('drop', (e) => {
 
 $('search').addEventListener('input', renderLibrary);
 $<HTMLSelectElement>('sort').addEventListener('change', () => {
-  try { localStorage.setItem('j2me4w:sort', $<HTMLSelectElement>('sort').value); } catch { /* ignore */ }
+  try { localStorage.setItem('j2me4w:sort', $<HTMLSelectElement>('sort').value); } catch {  }
   renderLibrary();
 });
 
@@ -1056,9 +1027,8 @@ window.addEventListener('beforeunload', (e) => {
   if (ws.sessions.some((s) => s.running)) e.preventDefault();
 });
 
-// ------------------------------------------------------------------ boot
 async function boot() {
-  try { $<HTMLSelectElement>('sort').value = localStorage.getItem('j2me4w:sort') ?? 'recent'; } catch { /* ignore */ }
+  try { $<HTMLSelectElement>('sort').value = localStorage.getItem('j2me4w:sort') ?? 'recent'; } catch {  }
   engine.setMuted(!!global.muted);
   engine.setVolume(global.volume / 100);
   try {
@@ -1067,10 +1037,8 @@ async function boot() {
     toast(`Storage unavailable: ${e}`, 5000);
     apps = [];
   }
-  // the library no longer lists the built-in demo
   for (const a of apps.filter((x) => x.builtin)) void store.delete(a.id).catch(() => {});
   apps = apps.filter((a) => !a.builtin);
-  // the on-screen keypad is now on by default: move games still on the old "auto" default
   if (!localStorage.getItem('j2me4w:migr:keypadShow2')) {
     for (const a of apps) {
       if (a.settings.keypad === 'auto' || a.settings.keypadOpacity < 0.6) {
@@ -1082,7 +1050,7 @@ async function boot() {
         void store.put(a).catch(() => {});
       }
     }
-    try { localStorage.setItem('j2me4w:migr:keypadShow2', '1'); } catch { /* ignore */ }
+    try { localStorage.setItem('j2me4w:migr:keypadShow2', '1'); } catch {  }
   }
   renderLibrary();
   history.replaceState({ view: 'library' }, '');

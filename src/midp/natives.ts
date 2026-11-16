@@ -1,4 +1,3 @@
-// Natives for MIDP (lcdui, game, rms, media), Nokia extensions and the j2me4w helpers.
 import { JArray, JObject, type JThread } from '../vm/model';
 import { SUSPEND, type VM } from '../vm/vm';
 import { decodePng } from './png';
@@ -28,7 +27,6 @@ export function registerMidpNatives(vm: VM, p: Platform): void {
   const gs = (o: JObject): GraphicsState => o.nat as GraphicsState;
   const ints = (a: JArray | null) => (a === null ? npe() : a.a as Int32Array);
 
-  // ---------------------------------------------------------------- Graphics
   vm.registerNatives(`${LCDUI}/Graphics`, {
     'translate(II)V': (_t, [g, x, y]) => { gs(g).tx += x; gs(g).ty += y; },
     'getTranslateX()I': (_t, [g]) => gs(g).tx,
@@ -75,7 +73,6 @@ export function registerMidpNatives(vm: VM, p: Platform): void {
     },
   });
 
-  // ---------------------------------------------------------------- Image
   vm.registerNatives(`${LCDUI}/Image`, {
     'getWidth()I': (_t, [self]) => img(self).surf.w,
     'getHeight()I': (_t, [self]) => img(self).surf.h,
@@ -115,14 +112,12 @@ export function registerMidpNatives(vm: VM, p: Platform): void {
     },
   });
 
-  // ---------------------------------------------------------------- Font
   vm.registerNatives(`${LCDUI}/Font`, {
     'height0(III)I': (_t, [face, style, size]) => p.fonts.height({ face, style, size }),
     'baseline0(III)I': (_t, [face, style, size]) => p.fonts.ascent({ face, style, size }),
     'stringWidth0(IIILjava/lang/String;)I': (_t, [face, style, size, s]) => p.fonts.stringWidth({ face, style, size }, S(s)),
   });
 
-  // ---------------------------------------------------------------- Display
   let screenImage: JObject | null = null;
   vm.registerNatives(`${LCDUI}/Display`, {
     'width0()I': () => p.width,
@@ -150,7 +145,6 @@ export function registerMidpNatives(vm: VM, p: Platform): void {
     'keyStates0()I': () => p.readKeyStates(),
   });
 
-  // ---------------------------------------------------------------- MIDlet / launcher
   vm.registerNatives('javax/microedition/midlet/MIDlet', {
     'exit0()V': () => { vm.exit(0, 'MIDlet exited'); },
     'getAppProperty0(Ljava/lang/String;)Ljava/lang/String;': (_t, [k]) => {
@@ -188,7 +182,6 @@ export function registerMidpNatives(vm: VM, p: Platform): void {
       },
   });
 
-  // ---------------------------------------------------------------- vendor graphics helpers
   const G = `L${LCDUI}/Graphics;`;
   const points = (xs: JArray, xo: number, ys: JArray, yo: number, n: number) => {
     const X = ints(xs), Y = ints(ys);
@@ -215,7 +208,6 @@ export function registerMidpNatives(vm: VM, p: Platform): void {
     'vibrate0(I)V': (_t, [ms]) => p.host.vibrate?.(ms),
   });
 
-  // ---------------------------------------------------------------- RMS
   vm.registerNatives('javax/microedition/rms/RecordStore', {
     'load0(Ljava/lang/String;)[B': (_t, [n]) => {
       const d = p.storage.get(S(n));
@@ -229,7 +221,6 @@ export function registerMidpNatives(vm: VM, p: Platform): void {
     'list0()[Ljava/lang/String;': () => vm.strArray(p.storage.list()),
   });
 
-  // ---------------------------------------------------------------- media
   const players = new Map<number, JObject>();
   const ended: JObject[] = [];
   let endWaiter: JThread | null = null;

@@ -1,20 +1,10 @@
-// Software rasterizer implementing MIDP Graphics semantics on a 32-bit pixel buffer.
-// Pixels are stored in canvas ImageData order (little-endian uint32 = 0xAABBGGRR),
-// so presenting a surface is a straight copy into an ImageData.
-
-/** 0xAARRGGBB (Java) <-> 0xAABBGGRR (internal). The swap is its own inverse. */
 export function swapRB(c: number): number {
   return ((c & 0xff00ff00) | ((c >>> 16) & 0xff) | ((c & 0xff) << 16)) >>> 0;
 }
 
 export class Surface {
   readonly px: Uint32Array;
-  /** Incremented on every modification (used by hosts to skip redundant presents). */
   version = 0;
-  /**
-   * When set, drawing into this surface is skipped. Used for display surfaces of sessions running
-   * in the background, so hidden games only run their logic.
-   */
   skipDraw = false;
   constructor(public readonly w: number, public readonly h: number, fill = 0xffffffff) {
     this.px = new Uint32Array(w * h);
@@ -31,11 +21,9 @@ export class Surface {
 export interface FontSpec { face: number; style: number; size: number }
 
 export interface Glyph {
-  /** Coverage mask (0-255), `w * h`. */
   mask: Uint8Array;
   w: number;
   h: number;
-  /** Offset of the mask's top-left relative to the pen position on the text's top line. */
   ox: number;
   oy: number;
   advance: number;
@@ -48,18 +36,15 @@ export interface FontRenderer {
   glyph(f: FontSpec, ch: string): Glyph;
 }
 
-// Anchor constants
 const HCENTER = 1, VCENTER = 2, LEFT = 4, RIGHT = 8, TOP = 16, BOTTOM = 32, BASELINE = 64;
 
 export class GraphicsState {
   tx = 0;
   ty = 0;
-  /** Clip rectangle in surface coordinates (may extend outside the surface). */
   cx = 0;
   cy = 0;
   cw: number;
   ch: number;
-  /** Current color as Java ARGB. */
   color = 0xff000000;
   stroke = 0;
   font: FontSpec = { face: 0, style: 0, size: 0 };
@@ -69,8 +54,6 @@ export class GraphicsState {
     this.ch = surf.h;
   }
 
-  // ---------------------------------------------------------------- clip helpers
-  /** Effective clip intersected with the surface: [x0, y0, x1, y1) */
   private clipBox(): [number, number, number, number] {
     const s = this.surf;
     return [
@@ -97,10 +80,8 @@ export class GraphicsState {
     this.ch = Math.max(0, y1 - y0);
   }
 
-  // ---------------------------------------------------------------- pixel ops
   private get colorInternal(): number { return swapRB(this.color); }
 
-  /** Fills [x0,x1) x [y0,y1) (surface coords, unclipped) with the current color. */
   private fillSpan(x0: number, y0: number, x1: number, y1: number): void {
     const [bx0, by0, bx1, by1] = this.clipBox();
     if (x0 < bx0) x0 = bx0;
@@ -130,7 +111,6 @@ export class GraphicsState {
     s.px[i] = a === 255 ? c : blend(s.px[i], c, a);
   }
 
-  // ---------------------------------------------------------------- primitives
   fillRect(x: number, y: number, w: number, h: number): void {
     if (this.surf.skipDraw) return;
     if (w <= 0 || h <= 0) return;
@@ -177,7 +157,6 @@ export class GraphicsState {
     this.surf.version++;
   }
 
-  /** Scanline polygon fill (even-odd, pixel centers). Points in translated coordinates. */
   fillPolygon(xs: number[], ys: number[]): void {
     if (this.surf.skipDraw) return;
     const n = xs.length;
@@ -205,7 +184,6 @@ export class GraphicsState {
         if (xb > xa) this.fillSpan(xa, y, xb, y + 1);
       }
     }
-    // Include edges so thin triangles stay visible, like most phone implementations.
     for (let i = 0, j = n - 1; i < n; j = i++) this.drawLine(xs[j], ys[j], xs[i], ys[i]);
   }
 
@@ -217,7 +195,6 @@ export class GraphicsState {
     this.fillPolygon([x1, x2, x3], [y1, y2, y3]);
   }
 
-  /** Arc test helper: is angle (deg, CCW from 3 o'clock) within [start, start+extent]? */
   private static inArc(ang: number, start: number, extent: number): boolean {
     if (extent >= 360 || extent <= -360) return true;
     if (extent < 0) { start += extent; extent = -extent; }
@@ -300,10 +277,6 @@ export class GraphicsState {
     this.drawArc(x + w - aw, y + h - ah, aw, ah, 270, 90);
   }
 
-  // ---------------------------------------------------------------- images
-  /**
-   * Draws a region of `src` with a Sprite transform. (x, y) and anchor are in translated coordinates.
-   */
   drawRegion(src: Surface, sx: number, sy: number, w: number, h: number, transform: number,
              x: number, y: number, anchor: number, exactCopy = false): void {
     if (this.surf.skipDraw) return;
@@ -318,17 +291,16 @@ export class GraphicsState {
     const u0 = Math.max(0, bx0 - x), v0 = Math.max(0, by0 - y);
     const u1 = Math.min(W, bx1 - x), v1 = Math.min(H, by1 - y);
     if (u0 >= u1 || v0 >= v1) return;
-    // source coordinate as affine function of dest (u, v)
     let ax = 1, bx = 0, cx = 0, ay = 0, by = 1, cy = 0;
     switch (transform) {
       case 0: break;
-      case 2: ax = -1; cx = w - 1; break; // MIRROR
-      case 1: by = -1; cy = h - 1; break; // MIRROR_ROT180
-      case 3: ax = -1; cx = w - 1; by = -1; cy = h - 1; break; // ROT180
-      case 5: ax = 0; bx = 1; ay = -1; by = 0; cy = h - 1; break; // ROT90
-      case 6: ax = 0; bx = -1; cx = w - 1; ay = 1; by = 0; break; // ROT270
-      case 7: ax = 0; bx = -1; cx = w - 1; ay = -1; by = 0; cy = h - 1; break; // MIRROR_ROT90
-      case 4: ax = 0; bx = 1; ay = 1; by = 0; break; // MIRROR_ROT270
+      case 2: ax = -1; cx = w - 1; break;
+      case 1: by = -1; cy = h - 1; break;
+      case 3: ax = -1; cx = w - 1; by = -1; cy = h - 1; break;
+      case 5: ax = 0; bx = 1; ay = -1; by = 0; cy = h - 1; break;
+      case 6: ax = 0; bx = -1; cx = w - 1; ay = 1; by = 0; break;
+      case 7: ax = 0; bx = -1; cx = w - 1; ay = -1; by = 0; cy = h - 1; break;
+      case 4: ax = 0; bx = 1; ay = 1; by = 0; break;
     }
     let sp = src.px;
     if (src === this.surf) sp = sp.slice();
@@ -351,7 +323,6 @@ export class GraphicsState {
     this.drawRegion(src, 0, 0, src.w, src.h, 0, x, y, anchor);
   }
 
-  /** rgb is Java ARGB ints. */
   drawRGB(rgb: Int32Array, offset: number, scan: number, x: number, y: number, w: number, h: number, alpha: boolean): void {
     if (this.surf.skipDraw) return;
     if (w <= 0 || h <= 0) return;
@@ -385,7 +356,6 @@ export class GraphicsState {
     this.drawRegion(tmp, 0, 0, w, h, 0, dx, dy, anchor, true);
   }
 
-  // ---------------------------------------------------------------- text
   drawString(str: string, x: number, y: number, anchor: number): void {
     if (this.surf.skipDraw) return;
     const fr = this.fonts;
@@ -414,7 +384,7 @@ export class GraphicsState {
       }
       pen += g.advance;
     }
-    if (f.style & 4) { // underline
+    if (f.style & 4) {
       const save = { tx: this.tx, ty: this.ty };
       this.tx = 0; this.ty = 0;
       const uy = y + fr.ascent(f) + 1;
@@ -425,7 +395,6 @@ export class GraphicsState {
   }
 }
 
-/** src-over blend of internal-format color `c` with coverage/alpha `a` (0-255) over opaque-ish dst. */
 export function blend(dst: number, c: number, a: number): number {
   const ia = 255 - a;
   const r = ((c & 0xff) * a + (dst & 0xff) * ia + 127) / 255 | 0;
@@ -436,7 +405,6 @@ export function blend(dst: number, c: number, a: number): number {
   return ((oa << 24) | (b << 16) | (g << 8) | r) >>> 0;
 }
 
-/** Applies a Sprite transform to a region, producing a new surface. */
 export function transformRegion(src: Surface, x: number, y: number, w: number, h: number, transform: number, fonts: FontRenderer): Surface {
   const swap = (transform & 4) !== 0;
   const out = new Surface(swap ? h : w, swap ? w : h, 0);

@@ -1,10 +1,8 @@
-// Runtime data structures: classes, methods, fields, objects, arrays, frames, threads, monitors.
 import type { ClassFile, CodeAttr, ExceptionHandler } from './classfile';
 
 export const enum ClassState { Loaded, Initializing, Initialized, Error }
 export const enum ThreadState { Runnable, Blocked, Dead }
 
-/** Marker occupying the second slot of a long/double on the operand stack and in locals. */
 export const TOP = undefined;
 
 export type NativeResult = unknown;
@@ -24,18 +22,14 @@ export class JField {
 }
 
 export class JMethod {
-  /** name + descriptor, e.g. "toString()Ljava/lang/String;" */
   readonly key: string;
   readonly isStatic: boolean;
   readonly isNative: boolean;
   readonly isAbstract: boolean;
   readonly isSync: boolean;
   readonly isPrivate: boolean;
-  /** Number of local slots taken by the arguments, including `this`. */
   readonly argSlots: number;
-  /** Indices into the raw argument slots that hold real values (skips long/double second slots). */
   readonly argIndex: number[] | null;
-  /** Return type descriptor char: 'V', 'I', 'J', 'L', '[', ... */
   readonly ret: string;
   readonly retWide: boolean;
   readonly code: Uint8Array | null;
@@ -87,7 +81,6 @@ export class JMethod {
   }
 }
 
-/** Parses a method descriptor; returns arg slot count, positions (slot index) of wide args and the return descriptor. */
 export function parseMethodDescriptor(desc: string): { slots: number; wideAt: number[]; ret: string; args: string[] } {
   let i = 1;
   let slots = 0;
@@ -121,13 +114,10 @@ export class Monitor {
 }
 
 export class JObject {
-  /** Instance field values, indexed by JField.slot. */
   f: any[];
   mon: Monitor | null = null;
   hash = 0;
-  /** JS string payload for java.lang.String / StringBuffer / StringBuilder. */
   s: string | null = null;
-  /** Native peer: JClass for Class objects, JThread for Thread, surfaces for images, etc. */
   nat: any = null;
   constructor(public cls: JClass, fields: any[]) { this.f = fields; }
 }
@@ -145,7 +135,6 @@ export class JClass {
   access = 0;
   fields: JField[] = [];
   methods = new Map<string, JMethod>();
-  /** Template of default instance field values (copied for every new object). */
   fieldTemplate: any[] = [];
   statics: any[] = [];
   state = ClassState.Loaded;
@@ -155,21 +144,15 @@ export class JClass {
   assignCache = new Map<JClass, boolean>();
   classObj: JObject | null = null;
   sourceFile: string | null = null;
-  /** For array classes: descriptor of the component ("I", "Ljava/lang/String;", "[I"). */
   componentDesc: string | null = null;
   componentClass: JClass | null = null;
 
   constructor(public readonly name: string, public readonly cf: ClassFile | null) {}
 
   get isInterface(): boolean { return (this.access & 0x0200) !== 0; }
-  get isArray(): boolean { return this.name.charCodeAt(0) === 91; /* '[' */ }
+  get isArray(): boolean { return this.name.charCodeAt(0) === 91;  }
   get javaName(): string { return this.name.replace(/\//g, '.'); }
 
-  /**
-   * Looks up a field in this class, its interfaces and superclasses (JVMS 5.4.3.2).
-   * Obfuscators reuse one name for fields of different types, so the descriptor must match too
-   * when it is known.
-   */
   findField(name: string, desc?: string): JField | null {
     for (let c: JClass | null = this; c; c = c.superClass) {
       for (const f of c.fields) if (f.name === name && (desc === undefined || f.desc === desc)) return f;
@@ -181,7 +164,6 @@ export class JClass {
     return null;
   }
 
-  /** Method resolution: class chain, then superinterfaces. */
   findMethod(key: string): JMethod | null {
     for (let c: JClass | null = this; c; c = c.superClass) {
       const m = c.methods.get(key);
@@ -204,7 +186,6 @@ export class JClass {
     return null;
   }
 
-  /** Virtual dispatch lookup (cached). */
   vlookup(key: string): JMethod | null {
     let m = this.vcache.get(key);
     if (m !== undefined) return m;
@@ -238,9 +219,7 @@ export class Frame {
   pc = 0;
   stack: any[] = [];
   locals: any[];
-  /** Object locked by a synchronized method, released on exit. */
   lockObj: JObject | null = null;
-  /** When set, this value is pushed to the caller instead of the method's return value. */
   retOverride: unknown = undefined;
   constructor(public readonly m: JMethod, args: any[]) {
     this.locals = args;
@@ -253,19 +232,15 @@ export class JThread {
   readonly id = JThread.nextId++;
   frames: Frame[] = [];
   state = ThreadState.Runnable;
-  /** java.lang.Thread object. */
   jobj: JObject | null = null;
-  /** Value to push when resuming from a suspended native. */
   hasPending = false;
   pending: unknown = undefined;
   pendingWide = false;
   pendingThrow: JObject | null = null;
   interrupted = false;
-  /** Set while in Object.wait(): monitor to re-acquire and the recursion count to restore. */
   reacquire: { mon: Monitor; count: number } | null = null;
   waitingOn: Monitor | null = null;
   timer: ReturnType<typeof setTimeout> | null = null;
-  /** True while blocked in sleep()/wait()/join() (interruptible). */
   interruptible = false;
   constructor(public name: string) {}
 }

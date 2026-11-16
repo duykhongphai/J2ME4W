@@ -1,4 +1,3 @@
-// One running MIDlet ("tab"): its own VM, canvas tile, audio channel, network route and save slot.
 import { Emulator, type Suite } from '../emulator';
 import { CanvasFontRenderer, defaultFontSizes } from '../midp/fonts';
 import type { RecordStorage, TextRequest } from '../midp/platform';
@@ -9,12 +8,10 @@ import { parseSysProps, rmsPrefix, type AppEntry, type ScaleMode } from './store
 
 export interface SessionDeps {
   engine: AudioEngine;
-  /** URL of the network bridge (empty = this server). */
   bridge(): string;
   log(line: string, err?: boolean): void;
   editText(req: TextRequest): Promise<{ text: string; command: number } | null>;
   onExit(s: Session, reason: string): void;
-  /** Pointer pressed on this session's screen (used to focus it). */
   onPointer(s: Session): void;
 }
 
@@ -90,11 +87,8 @@ export class Session {
   private lastFrame: Surface | null = null;
   private frames = 0;
   fps = 0;
-  /** True while the tile is on screen. */
   visible = true;
-  /** Keep drawing while hidden (costs CPU, keeps the screen current). */
   drawHidden = false;
-  /** Include this tab when input sync is on. */
   sync = true;
   paused = false;
   softLabels: [string | null, string | null] = [null, null];
@@ -173,7 +167,7 @@ export class Session {
       host: {
         present: (surf) => this.present(surf),
         setSoftLabels: (l, r) => { this.softLabels = [l, r]; this.onSoftLabels(l, r); },
-        vibrate: (ms) => { if (this.visible) { try { navigator.vibrate?.(Math.min(ms, 1000)); } catch { /* ignore */ } } },
+        vibrate: (ms) => { if (this.visible) { try { navigator.vibrate?.(Math.min(ms, 1000)); } catch {  } } },
         editText: (r) => this.deps.editText(r),
         openUrl: (url) => { if (/^https?:/i.test(url)) window.open(url, '_blank', 'noopener'); },
         onFatal: (msg) => this.showOverlay('MIDlet failed to start', msg),
@@ -228,14 +222,12 @@ export class Session {
     });
   }
 
-  /** Called once per second by the workspace. */
   sampleFps(): number {
     this.fps = this.frames;
     this.frames = 0;
     return this.fps;
   }
 
-  /** Shows or hides the tile. Hidden tabs keep running but skip drawing unless drawHidden is set. */
   setVisible(v: boolean, drawHidden: boolean): void {
     this.visible = v;
     this.drawHidden = drawHidden;
@@ -258,7 +250,6 @@ export class Session {
     this.ctx.putImageData(this.imageData, 0, 0);
   }
 
-  /** Scales the canvas into a box of aw x ah css px. */
   fit(scale: ScaleMode, aw: number, ah: number): void {
     const W = this.canvas.width, H = this.canvas.height;
     if (!aw || !ah || !W || !H) return;
@@ -285,17 +276,14 @@ export class Session {
     }, 'image/png');
   }
 
-  // ---------------------------------------------------------------- input (from the workspace)
   keyDown(code: number): void { this.emu?.platform.keyDown(code); }
   keyUp(code: number): void { this.emu?.platform.keyUp(code); }
   releaseKeys(): void { this.emu?.platform.releaseAllKeys(); }
 
-  /** Pointer in normalized screen coordinates (0..1). */
   pointer(type: 'down' | 'up' | 'move', nx: number, ny: number): void {
     this.emu?.platform.pointer(type, nx * this.canvas.width, ny * this.canvas.height);
   }
 
-  /** Pointer events on this screen; the workspace mirrors them to synced tabs. */
   onScreenPointer: (type: 'down' | 'up' | 'move', nx: number, ny: number) => void = () => {};
 
   private bindPointer(): void {
@@ -311,7 +299,7 @@ export class Session {
       if (!this.emu) return;
       this.audio.unlock();
       down = true;
-      try { c.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+      try { c.setPointerCapture(e.pointerId); } catch {  }
       const [x, y] = point(e);
       this.onScreenPointer('down', x, y);
     });
@@ -331,7 +319,6 @@ export class Session {
     c.addEventListener('contextmenu', (e) => e.preventDefault());
   }
 
-  // ---------------------------------------------------------------- page visibility
   pause(): void {
     if (!this.emu || this.paused || !this.app.settings.pauseWhenHidden) return;
     this.paused = true;

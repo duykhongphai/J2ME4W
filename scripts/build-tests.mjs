@@ -1,7 +1,3 @@
-// Builds the test programs:
-//  - test/java/*.java   -> compiled against rt (for our VM) and against the host JDK, which is run
-//                          to produce the expected output (test/out/expected/<Name>.txt)
-//  - test/midlets/<name>/ -> compiled against rt and packaged as test/out/<name>.jar (MIDlet suites)
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -29,7 +25,6 @@ for (const f of core) {
   fs.writeFileSync(path.join(outDir, 'expected', name + '.txt'), out);
 }
 
-// test images written by the JDK's PNG encoder
 const pngDir = path.join(outDir, 'png');
 run('java', [path.join(root, 'scripts', 'GenPng.java'), pngDir]);
 
@@ -42,7 +37,6 @@ if (fs.existsSync(midletsDir)) {
     fs.mkdirSync(classes, { recursive: true });
     const sources = fs.readdirSync(dir).filter((f) => f.endsWith('.java')).map((f) => path.join(dir, f));
     run('javac', [...javacRt, '-d', classes, ...sources]);
-    // copy resources (anything that is not .java / MANIFEST.MF)
     for (const f of fs.readdirSync(dir)) {
       if (f.endsWith('.java') || f === 'MANIFEST.MF') continue;
       fs.copyFileSync(path.join(dir, f), path.join(classes, f));

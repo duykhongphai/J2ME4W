@@ -1,4 +1,3 @@
-// Node networking host for headless runs: direct TCP and fetch (no proxy needed).
 import net from 'node:net';
 import type { HttpRequest, HttpResult, NetHost, NetSocket, NetSocketEvents } from '../src/midp/platform';
 

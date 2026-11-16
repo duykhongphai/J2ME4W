@@ -4,7 +4,6 @@ import javax.microedition.lcdui.game.*;
 import javax.microedition.midlet.*;
 import javax.microedition.rms.*;
 
-/** Built-in demo: a small arcade game plus pages that exercise the MIDP UI. */
 public class DemoMIDlet extends MIDlet implements CommandListener {
     Display display;
     private List menu;
@@ -45,7 +44,6 @@ public class DemoMIDlet extends MIDlet implements CommandListener {
                 }
                 case 2: display.setCurrent(buildForm()); break;
                 case 3: {
-                    // like an online game's login: one full-screen TextBox per field
                     user = new TextBox("Phone or email", "", 40, TextField.EMAILADDR);
                     user.addCommand(okCmd);
                     user.addCommand(backCmd);
@@ -102,7 +100,6 @@ public class DemoMIDlet extends MIDlet implements CommandListener {
     protected void destroyApp(boolean unconditional) {}
 }
 
-/** Dodge the falling stars. Left/right (or drag) to move. */
 class StarfallCanvas extends GameCanvas implements Runnable, CommandListener {
     private final DemoMIDlet midlet;
     private final Random rnd = new Random();
@@ -252,19 +249,16 @@ class StarfallCanvas extends GameCanvas implements Runnable, CommandListener {
     }
 
     private void draw(Graphics g, int w, int h, int frame) {
-        // night sky gradient
         for (int y = 0; y < h; y += 4) {
             int t = y * 255 / h;
             g.setColor(10 + t / 12, 12 + t / 10, 40 + t / 4);
             g.fillRect(0, y, w, 4);
         }
-        // parallax background dots
         g.setColor(0x506080);
         for (int i = 0; i < 30; i++) {
             int x = (i * 73) % w, y = (i * 151 + frame * (1 + i % 3)) % h;
             g.fillRect(x, y, 1, 1);
         }
-        // stars
         for (int i = 0; i < count; i++) {
             int r = sr[i];
             g.setColor(0xFFC040);
@@ -273,7 +267,6 @@ class StarfallCanvas extends GameCanvas implements Runnable, CommandListener {
             g.fillArc(sx[i] - r / 2, sy[i] - r / 2, r, r, 0, 360);
         }
         if (!over || frame % 10 < 5) g.drawImage(ship, px, h - 14, Graphics.HCENTER | Graphics.VCENTER);
-        // HUD
         Font f = Font.getFont(Font.FACE_SYSTEM, Font.STYLE_BOLD, Font.SIZE_SMALL);
         g.setFont(f);
         g.setColor(0xFFFFFF);
@@ -297,7 +290,6 @@ class StarfallCanvas extends GameCanvas implements Runnable, CommandListener {
     }
 }
 
-/** Draws every MIDP primitive so rendering bugs are easy to spot. */
 class GfxCanvas extends Canvas {
     private int page;
 
@@ -343,7 +335,6 @@ class GfxCanvas extends Canvas {
         g.setColor(0x000000);
         g.drawRect(2 * cw + 8, 94, cw - 16, 36);
         g.setStrokeStyle(Graphics.SOLID);
-        // text anchors
         int y = 150;
         g.setColor(0xEEEEEE);
         g.fillRect(0, y - 4, w, 70);
@@ -363,7 +354,6 @@ class GfxCanvas extends Canvas {
     }
 
     private void images(Graphics g, int w) {
-        // gradient via drawRGB with alpha
         int gw = w - 16, gh = 30;
         int[] rgb = new int[gw * gh];
         for (int y = 0; y < gh; y++)
@@ -372,7 +362,6 @@ class GfxCanvas extends Canvas {
         g.setColor(0xFFC040);
         g.fillRect(8, 8, gw / 2, gh);
         g.drawRGB(rgb, 0, gw, 8, 8, gw, gh, true);
-        // arrow image drawn with all 8 transforms
         Image arrow = Image.createImage(16, 12);
         Graphics ag = arrow.getGraphics();
         ag.setColor(0xFFFFFF);
@@ -394,7 +383,6 @@ class GfxCanvas extends Canvas {
             g.setColor(0x333333);
             g.drawString(names[i], cx, cy + 14, Graphics.TOP | Graphics.HCENTER);
         }
-        // clipping
         g.setClip(8, 180, 80, 40);
         g.setColor(0x20A060);
         g.fillArc(-10, 170, 140, 80, 0, 360);

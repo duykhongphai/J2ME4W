@@ -3,7 +3,6 @@ package j2me4w;
 import javax.microedition.lcdui.Graphics;
 import javax.microedition.lcdui.Image;
 
-/** Extra graphics primitives used by vendor APIs (Nokia DirectGraphics etc). */
 public final class GraphicsExt {
     private GraphicsExt() {}
     public static native void setARGBColor(Graphics g, int argb);

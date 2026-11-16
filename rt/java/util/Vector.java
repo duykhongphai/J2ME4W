@@ -105,7 +105,6 @@ public class Vector {
         for (int i = 0; i < elementCount; i++) elementData[i] = null;
         elementCount = 0;
     }
-    // Java 2 style helpers that some ports use
     public synchronized Object get(int index) { return elementAt(index); }
     public synchronized boolean add(Object o) { addElement(o); return true; }
     public synchronized Object remove(int index) { Object o = elementAt(index); removeElementAt(index); return o; }

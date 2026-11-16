@@ -4,7 +4,6 @@ import java.util.Vector;
 import javax.microedition.media.*;
 import javax.microedition.media.control.*;
 
-/** Player backed by the host audio engine (WebAudio). Silent if the host cannot play the format. */
 public final class AudioPlayer implements Player, VolumeControl, ToneControl {
     private static int counter;
     private final int handle;
@@ -68,7 +67,6 @@ public final class AudioPlayer implements Player, VolumeControl, ToneControl {
         if (controlType.endsWith("VolumeControl") || controlType.endsWith("ToneControl")) return this;
         return null;
     }
-    // VolumeControl
     public void setMute(boolean mute) { muted = mute; volume0(handle, muted ? 0 : level); }
     public boolean isMuted() { return muted; }
     public int setLevel(int l) {
@@ -79,7 +77,6 @@ public final class AudioPlayer implements Player, VolumeControl, ToneControl {
         return level;
     }
     public int getLevel() { return level; }
-    // ToneControl
     public void setSequence(byte[] sequence) { toneSequence0(handle, sequence); }
 
     private void fire(String event, Object data) {
@@ -89,14 +86,12 @@ public final class AudioPlayer implements Player, VolumeControl, ToneControl {
         }
     }
 
-    /** Called from the event thread when the host reports the end of playback. */
     public static void endOfMedia(int handle) {}
     void ended() {
         if (state != STARTED) return;
         state = PREFETCHED;
         fire(PlayerListener.END_OF_MEDIA, new Long(getMediaTime()));
     }
-    /** Polled by a helper thread: blocks until some player finishes, then dispatches END_OF_MEDIA. */
     static {
         Thread t = new Thread() {
             public void run() {

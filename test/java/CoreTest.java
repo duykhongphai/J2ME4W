@@ -1,10 +1,6 @@
 import java.io.*;
 import java.util.*;
 
-/**
- * Exercises the VM core. Compiled twice: against the j2me4w runtime (run in our VM) and against the
- * host JDK (run on a real JVM); the outputs must be identical.
- */
 public class CoreTest {
     static int staticCounter = init("static init");
     static final String CONST = "constant";

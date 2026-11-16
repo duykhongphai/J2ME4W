@@ -2,7 +2,6 @@ package javax.microedition.lcdui;
 
 import javax.microedition.midlet.MIDlet;
 
-/** Internal: the system event thread. */
 public final class EventLoop {
     static final int KEY_PRESSED = 1, KEY_RELEASED = 2, KEY_REPEATED = 3;
     static final int POINTER_PRESSED = 4, POINTER_RELEASED = 5, POINTER_DRAGGED = 6;
@@ -52,7 +51,6 @@ public final class EventLoop {
                 if (Display.repaintPending) Display.paintNow();
                 return;
             case FORCE_REPAINT:
-                // the host skipped drawing while this session was hidden: redraw everything
                 Display.paintNow();
                 return;
             case SERIAL:

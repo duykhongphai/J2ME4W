@@ -4,3 +4,5 @@ build/
 public/*.jar
 test/out/
 *.log
+.claude/
+.impeccable/

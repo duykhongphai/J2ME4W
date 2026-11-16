@@ -43,7 +43,6 @@ public class List extends Screen implements Choice {
     void paintContent(Graphics g, int y, int w, int h) {
         int n = m.size();
         if (n == 0) return;
-        // keep cursor visible
         int cy = 0;
         for (int i = 0; i < m.cursor; i++) cy += m.rowHeight(i);
         int ch = m.rowHeight(m.cursor);

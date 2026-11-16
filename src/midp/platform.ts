@@ -1,5 +1,3 @@
-// Device state shared between the host (browser / node) and the MIDP natives:
-// screen, event queue, key states, persistent storage and optional host services.
 import type { JArray, JThread } from '../vm/model';
 import type { VM } from '../vm/vm';
 import type { FontRenderer, Surface } from './surface';
@@ -8,21 +6,19 @@ export const EV_KEY_PRESSED = 1, EV_KEY_RELEASED = 2, EV_KEY_REPEATED = 3;
 export const EV_POINTER_PRESSED = 4, EV_POINTER_RELEASED = 5, EV_POINTER_DRAGGED = 6;
 export const EV_REPAINT = 7, EV_SERIAL = 8, EV_PAUSE = 9, EV_RESUME = 10, EV_FORCE_REPAINT = 11;
 
-/** Key codes (Nokia/Sony Ericsson convention). */
 export const KEY = {
   UP: -1, DOWN: -2, LEFT: -3, RIGHT: -4, FIRE: -5, SOFT_LEFT: -6, SOFT_RIGHT: -7, CLEAR: -8,
   NUM0: 48, NUM1: 49, NUM2: 50, NUM3: 51, NUM4: 52, NUM5: 53, NUM6: 54, NUM7: 55, NUM8: 56, NUM9: 57,
   STAR: 42, POUND: 35,
 } as const;
 
-/** Canvas game action for a key code (0 = none). */
 export function gameAction(code: number): number {
   switch (code) {
-    case -1: case 50: return 1; // UP
-    case -2: case 56: return 6; // DOWN
-    case -3: case 52: return 2; // LEFT
-    case -4: case 54: return 5; // RIGHT
-    case -5: case 53: return 8; // FIRE
+    case -1: case 50: return 1;
+    case -2: case 56: return 6;
+    case -3: case 52: return 2;
+    case -4: case 54: return 5;
+    case -5: case 53: return 8;
     case 49: return 9;
     case 51: return 10;
     case 55: return 11;
@@ -59,7 +55,6 @@ export interface AudioHost {
   tone(note: number, durationMs: number, volume: number): void;
 }
 
-/** An open TCP connection provided by the host. */
 export interface NetSocket {
   send(data: Uint8Array): void;
   close(): void;
@@ -67,7 +62,6 @@ export interface NetSocket {
 
 export interface NetSocketEvents {
   onData(data: Uint8Array): void;
-  /** Remote end closed (or failed after connecting); `error` is set for failures. */
   onClose(error?: string): void;
 }
 
@@ -75,33 +69,26 @@ export interface HttpRequest { method: string; url: string; headers: [string, st
 export interface HttpResult { status: number; message: string; headers: [string, string][]; body: Uint8Array }
 
 export interface NetHost {
-  /** Opens a TCP connection; rejects with a message if it cannot connect. */
   connect(host: string, port: number, events: NetSocketEvents): Promise<NetSocket>;
   http(req: HttpRequest): Promise<HttpResult>;
 }
 
-/** A request for text from TextBox / TextField. constraints are MIDP TextField constraints. */
 export interface TextRequest {
   title: string | null;
   text: string;
   maxSize: number;
   constraints: number;
-  /** Labels of the screen's commands, offered as buttons next to OK. */
   commands: string[];
 }
 
 export interface PlatformHost {
-  /** Networking (sockets and HTTP). Without it, Connector.open fails with IOException. */
   net?: NetHost;
-  /** Shows a finished frame. */
   present(surface: Surface): void;
   setSoftLabels?(left: string | null, right: string | null): void;
   vibrate?(ms: number): void;
-  /** Text entry. Resolves to null when cancelled; `command` is -1 or the index of a picked command. */
   editText?(req: TextRequest): Promise<{ text: string; command: number } | null>;
   openUrl?(url: string): void;
   onFatal?(message: string): void;
-  /** Async decoder for non-PNG images (JPEG, GIF, BMP). */
   decodeImage?(bytes: Uint8Array): Promise<Surface | null>;
   audio?: AudioHost;
 }
@@ -129,9 +116,7 @@ export class Platform {
   private held = 0;
   private latched = 0;
   private heldKeys = new Set<number>();
-  /** Surfaces shown on screen (the Display back buffer and GameCanvas buffers). */
   private displays = new Set<Surface>();
-  /** False while the session runs in the background: display drawing and presents are skipped. */
   rendering = true;
 
   constructor(private vm: VM, opts: PlatformOptions) {
@@ -145,7 +130,6 @@ export class Platform {
     vm.platform = this;
   }
 
-  // ---------------------------------------------------------------- events
   postEvent(type: number, a = 0, b = 0): void {
     if (this.vm.halted) return;
     if (this.waiter) {
@@ -156,8 +140,7 @@ export class Platform {
       this.vm.resume(t);
       return;
     }
-    if (this.queue.length >= 3 * 512) return; // drop when the app stops consuming events
-    // coalesce pointer drags
+    if (this.queue.length >= 3 * 512) return;
     if (type === EV_POINTER_DRAGGED && this.queue.length >= 3 && this.queue[this.queue.length - 3] === EV_POINTER_DRAGGED) {
       this.queue[this.queue.length - 2] = a;
       this.queue[this.queue.length - 1] = b;
@@ -166,7 +149,6 @@ export class Platform {
     this.queue.push(type, a, b);
   }
 
-  /** Called by the event thread. Returns true if an event was written, false if the thread must wait. */
   takeEvent(t: JThread, arr: JArray): boolean {
     if (this.queue.length) {
       const e = arr.a as Int32Array;
@@ -177,7 +159,6 @@ export class Platform {
     return false;
   }
 
-  // ---------------------------------------------------------------- input
   keyDown(code: number): void {
     const repeat = this.heldKeys.has(code);
     this.heldKeys.add(code);
@@ -202,24 +183,18 @@ export class Platform {
     this.postEvent(ev, Math.round(x), Math.round(y));
   }
 
-  /** GameCanvas.getKeyStates(): currently held keys plus keys pressed since the last call. */
   readKeyStates(): number {
     const r = this.held | this.latched;
     this.latched = 0;
     return r;
   }
 
-  /** Called for every surface that is presented. */
   registerDisplay(s: Surface): void {
     if (this.displays.has(s)) return;
     this.displays.add(s);
     s.skipDraw = !this.rendering;
   }
 
-  /**
-   * Turns drawing of on-screen surfaces on or off. The game logic keeps running either way;
-   * turning drawing back on asks the MIDlet to repaint everything.
-   */
   setRendering(on: boolean): void {
     if (on === this.rendering) return;
     this.rendering = on;

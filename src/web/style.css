@@ -10,7 +10,6 @@
   --danger: #c2372b;
   --radius: 12px;
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.05), 0 4px 14px rgba(0, 0, 0, 0.06);
-  /* player is always dark, like a phone */
   --p-bg: #0d0e10;
   --p-bar: #17191c;
   --p-ink: #e8e6e1;
@@ -91,7 +90,6 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .icon-btn:hover { background: color-mix(in srgb, currentColor 10%, transparent); }
 .icon-btn[aria-pressed="true"] { color: var(--accent); }
 
-/* ================================================================ library */
 .library-view { min-height: 100%; display: flex; flex-direction: column; }
 
 .appbar {
@@ -223,7 +221,6 @@ button, input, select, textarea { font: inherit; color: inherit; }
   .fab { display: flex; }
 }
 
-/* ================================================================ player */
 .player {
   position: fixed;
   inset: 0;
@@ -299,7 +296,6 @@ button, input, select, textarea { font: inherit; color: inherit; }
   z-index: 4;
 }
 .float-menu .ic { transform: rotate(90deg); }
-/* with the overlay keypad, sit next to the left soft key instead of over the game's HUD */
 .player-body[data-keypad="landscape"] ~ .float-menu {
   top: calc(10px + var(--safe-t));
   left: calc(14px + var(--safe-l));
@@ -311,9 +307,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 .player-body[data-keypad="landscape"] ~ .float-menu .ic { transform: none; }
 
-/* phones held sideways: maximize the game, keep a small menu handle */
 @media (max-height: 520px) and (pointer: coarse) {
-  /* the bar disappears; only the FPS counter stays, floating at the bottom */
   .player-bar {
     position: absolute;
     left: 50%;
@@ -333,7 +327,6 @@ button, input, select, textarea { font: inherit; color: inherit; }
   .hide-narrow { display: none; }
 }
 
-/* ================================================================ keypad */
 .keypad { flex: none; position: relative; --kp-opacity: 0.55; }
 .keypad button { touch-action: none; }
 .kp-item { position: absolute; display: flex; }
@@ -364,7 +357,6 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .kp-key small { font-size: 9px; font-weight: 500; opacity: 0.55; letter-spacing: 0.05em; }
 .kp-soft { background: #2a2e34; color: #f1efea; font-size: 15px; font-weight: 700; padding: 0 10px; border-radius: 14px; }
 .kp-soft .kp-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
-/* left soft key = confirm / menu in most games: a warm tint tells it apart from Back at a glance */
 .kp-soft-l { background: color-mix(in srgb, var(--accent) 24%, #2a2e34); border-color: color-mix(in srgb, var(--accent) 40%, #3a3f46); }
 .kp-soft-l.active { background: color-mix(in srgb, var(--accent) 40%, #2a2e34); }
 .kp-soft.fallback .kp-label { opacity: 0.6; font-weight: 600; }
@@ -374,7 +366,6 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .kp-fire.active { background: #e76a33; }
 .kp-fire .kp-label { font-size: 17px; letter-spacing: 0.08em; }
 
-/* key groups scale their labels with their own size */
 .kp-grid { display: grid; gap: 6px; container-type: size; }
 .kp-digits { grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(4, 1fr); }
 .kp-digits .kp-label { font-size: clamp(13px, min(11cqh, 9cqw), 26px); }
@@ -417,7 +408,6 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .kp-knob { position: absolute; inset: 38%; border-radius: 50%; background: #3f444c; pointer-events: none; }
 .kp-dpad.active .kp-knob { background: var(--accent); }
 
-/* ---- portrait: a panel under the screen */
 .keypad.portrait {
   background: #15171a;
   border-top: 1px solid #23262b;
@@ -425,12 +415,10 @@ button, input, select, textarea { font: inherit; color: inherit; }
   box-sizing: content-box;
 }
 
-/* ---- landscape: translucent groups over the stage */
 .keypad.landscape { position: absolute; inset: 0; pointer-events: none; z-index: 2; }
 .keypad.landscape .kp-item { pointer-events: auto; opacity: var(--kp-opacity); transition: opacity 0.15s; }
 .keypad.landscape .kp-item:has(.active), .keypad.landscape .kp-item:has(.kp-dpad.active) { opacity: 1; }
 
-/* ---- layout edit mode */
 .keypad.editing .kp-item {
   opacity: 1;
   cursor: grab;
@@ -488,7 +476,6 @@ button, input, select, textarea { font: inherit; color: inherit; }
   .edit-info span { display: none; }
 }
 
-/* ================================================================ sheets & dialogs */
 .sheet-backdrop {
   position: absolute;
   inset: 0;
@@ -629,7 +616,6 @@ button, input, select, textarea { font: inherit; color: inherit; }
   z-index: 100;
 }
 
-/* ================================================================ settings: tabs, controls */
 .tabs {
   display: flex;
   gap: 4px;
@@ -725,7 +711,6 @@ button, input, select, textarea { font: inherit; color: inherit; }
   .binding-row { grid-template-columns: 1fr; gap: 6px; }
 }
 
-/* ================================================================ browser surfaces */
 ::selection { background: color-mix(in srgb, var(--accent) 30%, transparent); }
 input, textarea { caret-color: var(--accent); }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
@@ -734,11 +719,9 @@ input, textarea { caret-color: var(--accent); }
 .player *, .sheet * { scrollbar-color: #3c4148 transparent; }
 input[type="range"] { accent-color: var(--accent); }
 
-/* the settings form is a column: header, tabs and footer keep their size, the body scrolls */
 .settings-dialog .dialog-head, .settings-dialog .tabs, .settings-dialog .dialog-actions { flex: none; }
 .settings-dialog .settings-body { flex: 1 1 auto; min-height: 0; overflow: auto; }
 
-/* ================================================================ multi-tab workspace */
 .bar-gap { flex: 1; min-width: 4px; }
 .tab-strip {
   display: flex;
@@ -785,7 +768,6 @@ input[type="range"] { accent-color: var(--accent); }
 }
 .tab-x .ic { width: 15px; height: 15px; }
 .tab-x:hover { background: #3a3f46; }
-/* state markers: stopped (dim), proxied (dot), synced (accent underline) */
 .tab-chip[data-status="exited"] .tab-label, .tab-chip[data-status="stopped"] .tab-label { text-decoration: line-through; opacity: 0.7; }
 .tab-chip.proxied img { outline: 2px solid #4f9dde; outline-offset: 1px; }
 .tab-chip.synced::after {
@@ -877,14 +859,12 @@ input[type="range"] { accent-color: var(--accent); }
 .dialog-head.plain { padding: 0 0 10px; border: 0; }
 #tabDialog .field input { font-family: ui-monospace, Consolas, monospace; font-size: 14px; }
 @media (max-width: 640px) {
-  /* narrow bars: other tabs collapse to their icon */
   .tab-strip .tab-chip:not([aria-selected="true"]) .tab-label { display: none; }
   .tab-strip .tab-chip:not([aria-selected="true"]) { padding: 0 6px; }
   .tab-strip .tab-chip[aria-selected="true"] .tab-label { max-width: 30vw; }
   .tab-strip .tab-x { display: none; }
 }
 
-/* ================================================================ text entry */
 .text-dialog { width: min(460px, calc(100vw - 24px)); }
 .text-field { position: relative; display: flex; }
 .text-field input { flex: 1; font-size: 17px; min-height: 46px; padding-right: 48px; }

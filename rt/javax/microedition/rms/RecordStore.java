@@ -143,7 +143,6 @@ public class RecordStore {
         return new j2me4w.RecordEnumerationImpl(this, filter, comparator, keepUpdated);
     }
 
-    /** Internal snapshot used by enumerations: ids in ascending order. */
     public synchronized int[] idsSnapshot0() {
         int[] r = new int[ids.size()];
         for (int i = 0; i < r.length; i++) r[i] = ((Integer) ids.elementAt(i)).intValue();

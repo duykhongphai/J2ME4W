@@ -1,5 +1,3 @@
-// Browser networking: TCP sockets and HTTP go through the J2ME4W proxy (server/proxy.mjs),
-// since pages cannot open raw sockets and most servers do not send CORS headers.
 import type { HttpRequest, HttpResult, NetHost, NetSocket, NetSocketEvents } from '../midp/platform';
 
 export const DEFAULT_PROXY = '/__j2me4w';
@@ -18,10 +16,6 @@ function fromBase64(s: string): Uint8Array {
 }
 
 export class ProxyNetHost implements NetHost {
-  /**
-   * base: the bridge URL (absolute, or a path on this origin).
-   * via: optional upstream proxy for this session, e.g. "socks5://user:pass@host:1080" or "http://host:8080".
-   */
   constructor(private base: () => string, private log: (msg: string) => void = () => {}, private via: () => string = () => '') {}
 
   private url(path: string, ws: boolean): string {

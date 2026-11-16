@@ -1,6 +1,3 @@
-// Debug tool: runs a MIDlet JAR headlessly, prints its console, optionally presses keys and saves a
-// screenshot.  Usage: npx tsx test/run-jar.ts <file.jar> [seconds=5] [out.png] [keys...]
-// keys: "<ms>:<keycode>" e.g. 2000:-5 presses FIRE two seconds after start.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -39,7 +36,6 @@ const emu = new Emulator({
 emu.onExit((code, reason) => console.log(`[run-jar] exit ${code} ${reason ?? ''}`));
 emu.start();
 for (const k of keys) {
-  // "<ms>:<keycode>" or "<ms>:tap:<x>,<y>"
   const parts = k.split(':');
   const ms = Number(parts[0]);
   if (parts[1] === 'tap') {

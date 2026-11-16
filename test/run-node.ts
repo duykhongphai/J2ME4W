@@ -1,6 +1,3 @@
-// Headless test runner.
-//  1. Core tests: runs each program in test/java in the VM and diffs its output against the real JVM's.
-//  2. MIDlet test: drives test/midlets/probe through the full MIDP stack with scripted input.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -129,7 +126,6 @@ async function probeTest(boot: Map<string, Uint8Array>): Promise<number> {
   }
   emu.stop();
 
-  // expected output lines
   const rgba: string[] = [];
   for (let y = 0; y < 3; y++) for (let x = 0; x < 4; x++) {
     const v = (((x * 80) << 24) | ((x * 60) << 16) | ((y * 100) << 8) | ((x + y * 4) * 10)) >>> 0;

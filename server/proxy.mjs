@@ -1,14 +1,3 @@
-// Network bridge for MIDlets running in the browser.
-//   WS   /__j2me4w/tcp?host=H&port=P[&via=URL]   raw TCP over a WebSocket (binary frames; "OK" text frame
-//                                               once connected)
-//   POST /__j2me4w/http                          JSON {method, url, headers:[[k,v]], body:base64|null, via?}
-//                                               -> JSON {status, message, headers:[[k,v]], body:base64}
-// `via` routes the connection through an upstream proxy (one per emulator tab):
-//   socks5://[user:pass@]host:port   (also socks5h://, hostname resolved by the proxy)
-//   http://[user:pass@]host:port     (HTTP CONNECT tunnel)
-// Private/loopback targets are refused unless J2ME4W_ALLOW_PRIVATE=1, so the bridge cannot be used to
-// reach the machine's own network. Upstream proxies on private addresses are allowed only when
-// `allowPrivateProxy` is set (the dev server and a loopback-bound `npm start` set it).
 import dns from 'node:dns/promises';
 import http from 'node:http';
 import https from 'node:https';
@@ -31,7 +20,6 @@ function isPrivateIp(ip) {
   return l === '::' || l === '::1' || l.startsWith('fc') || l.startsWith('fd') || l.startsWith('fe80');
 }
 
-/** Resolves `host` and returns an address that may be contacted. */
 async function resolveTarget(host, allowPrivate, what = '') {
   const h = host.replace(/^\[|\]$/g, '');
   const addrs = net.isIP(h) ? [{ address: h }] : await dns.lookup(h, { all: true });
@@ -68,10 +56,6 @@ function waitConnect(sock) {
   });
 }
 
-/**
- * Reads exactly n bytes in paused mode, so bytes that follow the proxy handshake stay buffered in the
- * socket for whoever reads it next (the bridge or an HTTP/TLS client).
- */
 function readBytes(sock, n) {
   return new Promise((resolve, reject) => {
     const tryRead = () => {
@@ -131,10 +115,6 @@ async function httpConnect(sock, p, host, port) {
   if (status !== 200) throw new Error(`HTTP proxy answered ${head.split('\r\n')[0]}`);
 }
 
-/**
- * Opens a TCP connection to host:port, directly or through the upstream proxy `via`.
- * Resolves once the connection (or tunnel) is ready.
- */
 async function openTcp(host, port, via, opts) {
   const p = parseVia(via);
   if (!p) {
@@ -144,11 +124,10 @@ async function openTcp(host, port, via, opts) {
     return sock;
   }
   const proxyAddr = await resolveTarget(p.host, opts.allowPrivateProxy || opts.allowPrivate, ' (proxy)');
-  // the target is checked here too, unless the proxy resolves names itself
   let target = host;
   if (!p.remoteDns || p.type === 'http' || net.isIP(host)) {
     target = await resolveTarget(host, opts.allowPrivate);
-    if (p.type === 'http' && !net.isIP(host)) target = host; // CONNECT by name keeps TLS SNI/vhosts working
+    if (p.type === 'http' && !net.isIP(host)) target = host;
   }
   const sock = net.connect({ host: proxyAddr, port: p.port });
   await waitConnect(sock);
@@ -180,7 +159,6 @@ function readBody(req, limit) {
 
 const DROP_REQUEST_HEADERS = new Set(['host', 'content-length', 'connection', 'transfer-encoding', 'keep-alive', 'upgrade']);
 
-/** HTTP(S) request over a socket from openTcp (used when an upstream proxy is set). */
 async function requestVia(url, method, headers, body, via, opts, redirects = 5) {
   const target = new URL(url);
   const secure = target.protocol === 'https:';
@@ -240,7 +218,7 @@ export function createProxy(options = {}) {
     const fail = (msg) => {
       if (closed) return;
       closed = true;
-      try { ws.close(4000, String(msg).slice(0, 120)); } catch { /* ignore */ }
+      try { ws.close(4000, String(msg).slice(0, 120)); } catch {  }
       tcp?.destroy();
     };
     openTcp(host, port, via, opts).then((sock) => {
@@ -255,7 +233,7 @@ export function createProxy(options = {}) {
         if (closed) return;
         closed = true;
         log(`tcp ${label} closed`);
-        try { ws.close(1000, 'closed'); } catch { /* ignore */ }
+        try { ws.close(1000, 'closed'); } catch {  }
       });
     }, (e) => fail(e.message));
     ws.on('message', (data, isBinary) => {
@@ -267,7 +245,6 @@ export function createProxy(options = {}) {
   }
 
   return {
-    /** Returns true if the upgrade request was for the bridge. */
     handleUpgrade(req, socket, head) {
       const u = new URL(req.url, 'http://x');
       if (u.pathname !== `${PREFIX}/tcp`) return false;
@@ -282,7 +259,6 @@ export function createProxy(options = {}) {
       return true;
     },
 
-    /** Returns true if the request was handled. */
     handleHttp(req, res) {
       const u = new URL(req.url, 'http://x');
       if (u.pathname !== `${PREFIX}/http`) return false;

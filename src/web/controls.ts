@@ -1,6 +1,3 @@
-// Hardware input: keyboard and gamepad bindings for MIDP keys.
-// A binding is "k:<KeyboardEvent.code>", "p:<standard gamepad button>" or "a:<axis><+|->".
-
 export interface MidpKey { code: number; name: string }
 
 export const MIDP_KEYS: MidpKey[] = [
@@ -35,7 +32,6 @@ export function bindingsFor(custom: Record<string, string[]>, code: number): str
   return custom[String(code)] ?? DEFAULT_BINDINGS[code] ?? [];
 }
 
-/** binding string -> MIDP key code. Later keys win on conflicts. */
 export function buildBindingMap(custom: Record<string, string[]>): Map<string, number> {
   const m = new Map<string, number>();
   for (const k of MIDP_KEYS) for (const b of bindingsFor(custom, k.code)) m.set(b, k.code);
@@ -61,7 +57,6 @@ export function bindingLabel(b: string): string {
   return v.replace(/([a-z])([A-Z])/g, '$1 $2');
 }
 
-/** Bindings currently held on all connected gamepads. */
 export function readGamepads(): Set<string> {
   const out = new Set<string>();
   const pads = navigator.getGamepads?.() ?? [];

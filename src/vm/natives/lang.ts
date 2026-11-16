@@ -1,4 +1,3 @@
-// Natives for java.lang, java.util and the j2me4w console helpers.
 import { JArray, JClass, JObject, ThreadState, type JThread } from '../model';
 import { FRAMES_PUSHED, RETRY, YIELD, type VM } from '../vm';
 import {
@@ -16,7 +15,6 @@ export function registerLangNatives(vm: VM): void {
   const npe = (): never => vm.throwNew('java/lang/NullPointerException');
   const sioobe = (i: number): never => vm.throwNew('java/lang/StringIndexOutOfBoundsException', 'String index out of range: ' + i);
 
-  // ---------------------------------------------------------------- Object
   vm.registerNatives('java/lang/Object', {
     'getClass()Ljava/lang/Class;': (_t, [self]) => vm.classObject(self.cls),
     'hashCode()I': (_t, [self]) => vm.identityHash(self),
@@ -40,7 +38,6 @@ export function registerLangNatives(vm: VM): void {
     },
   });
 
-  // ---------------------------------------------------------------- Class
   vm.registerNatives('java/lang/Class', {
     'forName0(Ljava/lang/String;)Ljava/lang/Class;': (_t, [name]) => {
       const n = S(name).replace(/\./g, '/');
@@ -65,7 +62,7 @@ export function registerLangNatives(vm: VM): void {
       const ctor = cls.methods.get('<init>()V');
       if (!ctor) vm.throwNew('java/lang/InstantiationException', cls.javaName);
       if (ctor.isPrivate) vm.throwNew('java/lang/IllegalAccessException', cls.javaName);
-      if (cls.state === 1 /* Initializing */ && cls.initThread !== t) return RETRY;
+      if (cls.state === 1  && cls.initThread !== t) return RETRY;
       const obj = vm.newObject(cls);
       const fr = vm.pushFrame(t, ctor, [obj]);
       fr.retOverride = obj;
@@ -93,7 +90,6 @@ export function registerLangNatives(vm: VM): void {
     },
   });
 
-  // ---------------------------------------------------------------- String
   const checkRange = (len: number, begin: number, end: number) => {
     if (begin < 0) sioobe(begin);
     if (end > len) sioobe(end);
@@ -218,7 +214,6 @@ export function registerLangNatives(vm: VM): void {
     'valueOf(C)Ljava/lang/String;': (_t, [c]) => str(String.fromCharCode(c)),
   });
 
-  // ---------------------------------------------------------------- StringBuffer / StringBuilder
   for (const cn of ['java/lang/StringBuffer', 'java/lang/StringBuilder']) {
     const T = `L${cn};`;
     const sb = (o: JObject) => o.s ?? '';
@@ -294,7 +289,6 @@ export function registerLangNatives(vm: VM): void {
     });
   }
 
-  // ---------------------------------------------------------------- Throwable
   vm.registerNatives('java/lang/Throwable', {
     'fillInStackTrace0()V': (t, [self]) => {
       let skip = 0;
@@ -316,7 +310,6 @@ export function registerLangNatives(vm: VM): void {
     },
   });
 
-  // ---------------------------------------------------------------- Thread
   const threadOf = (t: JThread): JObject => {
     if (!t.jobj) {
       const o = vm.newObjectByName('java/lang/Thread');
@@ -353,7 +346,6 @@ export function registerLangNatives(vm: VM): void {
     },
   });
 
-  // ---------------------------------------------------------------- System / Runtime
   const t0 = typeof performance !== 'undefined' ? performance.now() : Date.now();
   vm.registerNatives('java/lang/System', {
     'currentTimeMillis()J': () => BigInt(Date.now()),
@@ -395,7 +387,6 @@ export function registerLangNatives(vm: VM): void {
     'exit(I)V': (_t, [_self, code]) => { flushConsole(); vm.exit(code, 'System.exit(' + code + ')'); },
   });
 
-  // ---------------------------------------------------------------- Math
   vm.registerNatives('java/lang/Math', {
     'max(FF)F': (_t, [a, c]) => (a !== a ? a : Math.max(a, c)),
     'max(DD)D': (_t, [a, c]) => Math.max(a, c),
@@ -421,7 +412,6 @@ export function registerLangNatives(vm: VM): void {
     },
   });
 
-  // ---------------------------------------------------------------- Character / numbers
   vm.registerNatives('java/lang/Character', {
     'isLowerCase(C)Z': (_t, [c]) => { const s = String.fromCharCode(c); return b(s !== s.toUpperCase() && s === s.toLowerCase()); },
     'isUpperCase(C)Z': (_t, [c]) => { const s = String.fromCharCode(c); return b(s !== s.toLowerCase() && s === s.toUpperCase()); },
@@ -476,7 +466,6 @@ export function registerLangNatives(vm: VM): void {
     'longBitsToDouble(J)D': (_t, [l]) => { buf.setBigInt64(0, l); return buf.getFloat64(0); },
   });
 
-  // ---------------------------------------------------------------- java.util time helpers
   const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   const p2 = (n: number) => String(n).padStart(2, '0');
@@ -497,7 +486,7 @@ export function registerLangNatives(vm: VM): void {
       const f = arr.a as Int32Array;
       const start = Date.UTC(d.getUTCFullYear(), 0, 1);
       const doy = Math.floor((d.getTime() - start) / 86400000) + 1;
-      f[0] = 1; // ERA AD
+      f[0] = 1;
       f[1] = d.getUTCFullYear();
       f[2] = d.getUTCMonth();
       f[3] = Math.floor((doy - 1) / 7) + 1;
@@ -521,7 +510,6 @@ export function registerLangNatives(vm: VM): void {
     },
   });
 
-  // ---------------------------------------------------------------- console
   const bufs: Record<'out' | 'err', number[]> = { out: [], err: [] };
   const emit = (stream: 'out' | 'err') => {
     const bytes = bufs[stream];

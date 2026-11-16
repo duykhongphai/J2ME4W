@@ -1,6 +1,3 @@
-// Compiles the Java runtime library (rt/) into public/rt.jar.
-// The library replaces java.lang itself, so javac must not see the host JDK's classes:
-// -source/-target 8 with a -bootclasspath pointing at our own output.
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -42,7 +39,6 @@ fs.rmSync(jarPath, { force: true });
 execFileSync('jar', ['cf', jarPath, '-C', out, '.'], { stdio: 'inherit' });
 console.log(`rt.jar: ${sources.length} sources -> ${path.relative(root, jarPath)} (${fs.statSync(jarPath).size} bytes)`);
 
-// Example MIDlets (examples/<name>/*.java + MANIFEST.MF) -> public/<name>.jar
 const examples = path.join(root, 'examples');
 for (const name of fs.existsSync(examples) ? fs.readdirSync(examples) : []) {
   const dir = path.join(examples, name);

@@ -2,11 +2,6 @@ package javax.microedition.lcdui;
 
 import java.util.Vector;
 
-/**
- * Full-screen text editor. Like on real phones, the host's text editor opens as soon as the TextBox is
- * shown; it also opens on Fire, on a click/tap and on any key that types a character. The screen's
- * commands are offered in the editor, so the user can type and confirm in one step.
- */
 public class TextBox extends Screen {
     private final TextBuffer buf;
     private boolean editing;
@@ -43,7 +38,6 @@ public class TextBox extends Screen {
 
     void showNotify0() {
         final int serial = ++shownSerial;
-        // open the editor right away, but not inside setCurrent(): the game thread must not block here
         Display.runLater(new Runnable() {
             public void run() { if (serial == shownSerial && shown) edit(); }
         });
@@ -51,7 +45,6 @@ public class TextBox extends Screen {
 
     void hideNotify0() { shownSerial++; }
 
-    /** Opens the host editor; runs on the event thread. */
     void edit() {
         if (editing || (buf.constraints & TextField.UNEDITABLE) != 0) return;
         editing = true;
@@ -60,7 +53,6 @@ public class TextBox extends Screen {
             String[] labels = new String[cmds.size()];
             for (int i = 0; i < labels.length; i++) {
                 Command c = (Command) cmds.elementAt(i);
-                // \u0001 marks Back/Cancel/Exit/Stop so the host maps Enter to a positive command
                 labels[i] = (c.isNegative() ? "\u0001" : "") + c.getLabel();
             }
             String[] result = new String[1];

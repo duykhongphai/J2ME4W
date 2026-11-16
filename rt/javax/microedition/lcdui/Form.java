@@ -96,7 +96,6 @@ public class Form extends Screen {
     void paintContent(Graphics g, int y, int w, int h) {
         lastViewH = h;
         int iw = w - 8;
-        // keep focus visible
         if (focus >= 0) {
             int fy = 0;
             for (int i = 0; i < focus; i++) fy += ((Item) items.elementAt(i)).height(iw) + 4;
@@ -132,7 +131,6 @@ public class Form extends Screen {
         return false;
     }
 
-    /** Mouse / touch: a tap selects the item under it and acts on it (opens text fields, picks choices...). */
     void pointerEvent0(int type, int x, int y) {
         if (type != EventLoop.POINTER_RELEASED) return;
         int top = title != null ? titleFont().getHeight() + 4 : 0;

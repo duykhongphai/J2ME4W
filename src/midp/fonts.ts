@@ -1,7 +1,5 @@
-// Font metrics and glyph rasterization for the software renderer.
 import type { FontRenderer, FontSpec, Glyph } from './surface';
 
-/** Pixel sizes for SIZE_SMALL (8), SIZE_MEDIUM (0), SIZE_LARGE (16). */
 export interface FontSizes { small: number; medium: number; large: number }
 
 export function defaultFontSizes(screenWidth: number): FontSizes {
@@ -17,7 +15,6 @@ function pxSize(sizes: FontSizes, f: FontSpec): number {
 
 const key = (f: FontSpec) => f.face | (f.style << 8) | (f.size << 16);
 
-/** Headless renderer: deterministic metrics, invisible glyphs. */
 export class NullFontRenderer implements FontRenderer {
   constructor(private sizes: FontSizes = defaultFontSizes(240)) {}
   height(f: FontSpec) { return pxSize(this.sizes, f) + 3; }
@@ -30,7 +27,6 @@ export class NullFontRenderer implements FontRenderer {
 
 interface Metrics { ascent: number; descent: number }
 
-/** Renders glyphs with a 2D canvas and caches their coverage masks. */
 export class CanvasFontRenderer implements FontRenderer {
   private ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
   private metrics = new Map<number, Metrics>();
@@ -41,7 +37,6 @@ export class CanvasFontRenderer implements FontRenderer {
     private sizes: FontSizes,
     private family = 'Arial, Helvetica, sans-serif',
     private monoFamily = '"Courier New", monospace',
-    /** Snap coverage to on/off for a crisp "phone font" look. */
     private crisp = false,
   ) {
     const canvas: any = typeof OffscreenCanvas !== 'undefined'

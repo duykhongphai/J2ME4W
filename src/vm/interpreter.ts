@@ -1,5 +1,3 @@
-// Bytecode interpreter. Non-recursive: Java calls push frames on the thread's own stack,
-// so a thread can be suspended at any instruction boundary (green threads).
 import { Frame, JArray, JClass, JMethod, JObject, JThread, ThreadState, TOP } from './model';
 import { FRAMES_PUSHED, JavaThrow, RETRY, SUSPEND, YIELD, type VM } from './vm';
 
@@ -24,11 +22,7 @@ function f2l(v: number): bigint {
 const s8 = (v: number) => (v << 24) >> 24;
 const s16 = (v: number) => (v << 16) >> 16;
 
-/**
- * Runs thread `t` for up to `budget` instructions, or until it blocks or finishes.
- */
 export function execute(vm: VM, t: JThread, budget: number): void {
-  // Resume bookkeeping for a thread coming back from Object.wait / a suspended native.
   if (t.reacquire) {
     const { mon, count } = t.reacquire;
     if (mon.owner === null) {
@@ -77,7 +71,7 @@ export function execute(vm: VM, t: JThread, budget: number): void {
         opPc = pc;
         const op = code[pc++];
         switch (op) {
-          case 0: break; // nop
+          case 0: break;
           case 1: stack.push(null); break;
           case 2: case 3: case 4: case 5: case 6: case 7: case 8: stack.push(op - 3); break;
           case 9: stack.push(0n, TOP); break;
@@ -87,13 +81,12 @@ export function execute(vm: VM, t: JThread, budget: number): void {
           case 13: stack.push(2); break;
           case 14: stack.push(0, TOP); break;
           case 15: stack.push(1, TOP); break;
-          case 16: stack.push(s8(code[pc++])); break; // bipush
-          case 17: stack.push(s16((code[pc] << 8) | code[pc + 1])); pc += 2; break; // sipush
-          case 18: stack.push(vm.resolveConstant(cls, code[pc++])); break; // ldc
-          case 19: stack.push(vm.resolveConstant(cls, (code[pc] << 8) | code[pc + 1])); pc += 2; break; // ldc_w
-          case 20: stack.push(vm.resolveConstant(cls, (code[pc] << 8) | code[pc + 1]), TOP); pc += 2; break; // ldc2_w
+          case 16: stack.push(s8(code[pc++])); break;
+          case 17: stack.push(s16((code[pc] << 8) | code[pc + 1])); pc += 2; break;
+          case 18: stack.push(vm.resolveConstant(cls, code[pc++])); break;
+          case 19: stack.push(vm.resolveConstant(cls, (code[pc] << 8) | code[pc + 1])); pc += 2; break;
+          case 20: stack.push(vm.resolveConstant(cls, (code[pc] << 8) | code[pc + 1]), TOP); pc += 2; break;
 
-          // loads
           case 21: case 23: case 25: stack.push(locals[code[pc++]]); break;
           case 22: case 24: stack.push(locals[code[pc++]], TOP); break;
           case 26: case 27: case 28: case 29: stack.push(locals[op - 26]); break;
@@ -102,7 +95,6 @@ export function execute(vm: VM, t: JThread, budget: number): void {
           case 38: case 39: case 40: case 41: stack.push(locals[op - 38], TOP); break;
           case 42: case 43: case 44: case 45: stack.push(locals[op - 42]); break;
 
-          // array loads
           case 46: case 48: case 50: case 51: case 52: case 53: {
             const i = stack.pop();
             const a = stack.pop() as JArray;
@@ -120,7 +112,6 @@ export function execute(vm: VM, t: JThread, budget: number): void {
             break;
           }
 
-          // stores
           case 54: case 56: case 58: locals[code[pc++]] = stack.pop(); break;
           case 55: case 57: { stack.pop(); locals[code[pc++]] = stack.pop(); break; }
           case 59: case 60: case 61: case 62: locals[op - 59] = stack.pop(); break;
@@ -129,7 +120,6 @@ export function execute(vm: VM, t: JThread, budget: number): void {
           case 71: case 72: case 73: case 74: stack.pop(); locals[op - 71] = stack.pop(); break;
           case 75: case 76: case 77: case 78: locals[op - 75] = stack.pop(); break;
 
-          // array stores
           case 79: case 81: case 84: case 85: case 86: {
             const v = stack.pop();
             const i = stack.pop();
@@ -149,7 +139,7 @@ export function execute(vm: VM, t: JThread, budget: number): void {
             a.a[i] = v;
             break;
           }
-          case 83: { // aastore
+          case 83: {
             const v = stack.pop() as JObject | null;
             const i = stack.pop();
             const a = stack.pop() as JArray;
@@ -165,7 +155,6 @@ export function execute(vm: VM, t: JThread, budget: number): void {
             break;
           }
 
-          // stack
           case 87: stack.pop(); break;
           case 88: stack.pop(); stack.pop(); break;
           case 89: stack.push(stack[stack.length - 1]); break;
@@ -180,7 +169,6 @@ export function execute(vm: VM, t: JThread, budget: number): void {
           }
           case 95: { const v1 = stack.pop(), v2 = stack.pop(); stack.push(v1, v2); break; }
 
-          // int arithmetic
           case 96: { const b = stack.pop(); stack.push((stack.pop() + b) | 0); break; }
           case 100: { const b = stack.pop(); stack.push((stack.pop() - b) | 0); break; }
           case 104: { const b = stack.pop(); stack.push(Math.imul(stack.pop(), b)); break; }
@@ -204,7 +192,6 @@ export function execute(vm: VM, t: JThread, budget: number): void {
           case 128: { const b = stack.pop(); stack.push(stack.pop() | b); break; }
           case 130: { const b = stack.pop(); stack.push(stack.pop() ^ b); break; }
 
-          // long arithmetic
           case 97: { stack.pop(); const b = stack.pop(); stack.pop(); stack.push(BigInt.asIntN(64, stack.pop() + b), TOP); break; }
           case 101: { stack.pop(); const b = stack.pop(); stack.pop(); stack.push(BigInt.asIntN(64, (stack.pop() as bigint) - b), TOP); break; }
           case 105: { stack.pop(); const b = stack.pop(); stack.pop(); stack.push(BigInt.asIntN(64, (stack.pop() as bigint) * b), TOP); break; }
@@ -232,7 +219,6 @@ export function execute(vm: VM, t: JThread, budget: number): void {
           case 129: { stack.pop(); const b = stack.pop(); stack.pop(); stack.push(stack.pop() | b, TOP); break; }
           case 131: { stack.pop(); const b = stack.pop(); stack.pop(); stack.push(stack.pop() ^ b, TOP); break; }
 
-          // float arithmetic
           case 98: { const b = stack.pop(); stack.push(Math.fround(stack.pop() + b)); break; }
           case 102: { const b = stack.pop(); stack.push(Math.fround(stack.pop() - b)); break; }
           case 106: { const b = stack.pop(); stack.push(Math.fround(stack.pop() * b)); break; }
@@ -240,7 +226,6 @@ export function execute(vm: VM, t: JThread, budget: number): void {
           case 114: { const b = stack.pop(); stack.push(Math.fround(stack.pop() % b)); break; }
           case 118: stack.push(-stack.pop()); break;
 
-          // double arithmetic
           case 99: { stack.pop(); const b = stack.pop(); stack.pop(); stack.push(stack.pop() + b, TOP); break; }
           case 103: { stack.pop(); const b = stack.pop(); stack.pop(); stack.push(stack.pop() - b, TOP); break; }
           case 107: { stack.pop(); const b = stack.pop(); stack.pop(); stack.push(stack.pop() * b, TOP); break; }
@@ -248,30 +233,28 @@ export function execute(vm: VM, t: JThread, budget: number): void {
           case 115: { stack.pop(); const b = stack.pop(); stack.pop(); stack.push(stack.pop() % b, TOP); break; }
           case 119: { stack.pop(); stack.push(-stack.pop(), TOP); break; }
 
-          case 132: { // iinc
+          case 132: {
             const idx = code[pc++];
             locals[idx] = (locals[idx] + s8(code[pc++])) | 0;
             break;
           }
 
-          // conversions
-          case 133: stack.push(BigInt(stack.pop()), TOP); break; // i2l
-          case 134: stack.push(Math.fround(stack.pop())); break; // i2f
-          case 135: stack.push(stack.pop(), TOP); break; // i2d
-          case 136: stack.pop(); stack.push(Number(BigInt.asIntN(32, stack.pop()))); break; // l2i
-          case 137: stack.pop(); stack.push(Math.fround(Number(stack.pop()))); break; // l2f
-          case 138: stack.pop(); stack.push(Number(stack.pop()), TOP); break; // l2d
-          case 139: stack.push(f2i(stack.pop())); break; // f2i
-          case 140: stack.push(f2l(stack.pop()), TOP); break; // f2l
-          case 141: stack.push(stack.pop(), TOP); break; // f2d
-          case 142: stack.pop(); stack.push(f2i(stack.pop())); break; // d2i
-          case 143: stack.pop(); stack.push(f2l(stack.pop()), TOP); break; // d2l
-          case 144: stack.pop(); stack.push(Math.fround(stack.pop())); break; // d2f
-          case 145: stack.push(s8(stack.pop())); break; // i2b
-          case 146: stack.push(stack.pop() & 0xffff); break; // i2c
-          case 147: stack.push(s16(stack.pop())); break; // i2s
+          case 133: stack.push(BigInt(stack.pop()), TOP); break;
+          case 134: stack.push(Math.fround(stack.pop())); break;
+          case 135: stack.push(stack.pop(), TOP); break;
+          case 136: stack.pop(); stack.push(Number(BigInt.asIntN(32, stack.pop()))); break;
+          case 137: stack.pop(); stack.push(Math.fround(Number(stack.pop()))); break;
+          case 138: stack.pop(); stack.push(Number(stack.pop()), TOP); break;
+          case 139: stack.push(f2i(stack.pop())); break;
+          case 140: stack.push(f2l(stack.pop()), TOP); break;
+          case 141: stack.push(stack.pop(), TOP); break;
+          case 142: stack.pop(); stack.push(f2i(stack.pop())); break;
+          case 143: stack.pop(); stack.push(f2l(stack.pop()), TOP); break;
+          case 144: stack.pop(); stack.push(Math.fround(stack.pop())); break;
+          case 145: stack.push(s8(stack.pop())); break;
+          case 146: stack.push(stack.pop() & 0xffff); break;
+          case 147: stack.push(s16(stack.pop())); break;
 
-          // comparisons
           case 148: {
             stack.pop(); const b = stack.pop(); stack.pop(); const a = stack.pop();
             stack.push(a > b ? 1 : a < b ? -1 : 0);
@@ -288,7 +271,6 @@ export function execute(vm: VM, t: JThread, budget: number): void {
             break;
           }
 
-          // branches
           case 153: if (stack.pop() === 0) pc = opPc + s16((code[pc] << 8) | code[pc + 1]); else pc += 2; break;
           case 154: if (stack.pop() !== 0) pc = opPc + s16((code[pc] << 8) | code[pc + 1]); else pc += 2; break;
           case 155: if (stack.pop() < 0) pc = opPc + s16((code[pc] << 8) | code[pc + 1]); else pc += 2; break;
@@ -303,10 +285,10 @@ export function execute(vm: VM, t: JThread, budget: number): void {
           case 164: { const b = stack.pop(); if (stack.pop() <= b) pc = opPc + s16((code[pc] << 8) | code[pc + 1]); else pc += 2; break; }
           case 165: { const b = stack.pop(); if (stack.pop() === b) pc = opPc + s16((code[pc] << 8) | code[pc + 1]); else pc += 2; break; }
           case 166: { const b = stack.pop(); if (stack.pop() !== b) pc = opPc + s16((code[pc] << 8) | code[pc + 1]); else pc += 2; break; }
-          case 167: pc = opPc + s16((code[pc] << 8) | code[pc + 1]); break; // goto
-          case 168: stack.push(pc + 2); pc = opPc + s16((code[pc] << 8) | code[pc + 1]); break; // jsr
-          case 169: pc = locals[code[pc]]; break; // ret
-          case 170: { // tableswitch
+          case 167: pc = opPc + s16((code[pc] << 8) | code[pc + 1]); break;
+          case 168: stack.push(pc + 2); pc = opPc + s16((code[pc] << 8) | code[pc + 1]); break;
+          case 169: pc = locals[code[pc]]; break;
+          case 170: {
             pc = (pc + 3) & ~3;
             const def = readS4(code, pc);
             const lo = readS4(code, pc + 4);
@@ -315,13 +297,12 @@ export function execute(vm: VM, t: JThread, budget: number): void {
             pc = k < lo || k > hi ? opPc + def : opPc + readS4(code, pc + 12 + (k - lo) * 4);
             break;
           }
-          case 171: { // lookupswitch
+          case 171: {
             pc = (pc + 3) & ~3;
             const def = readS4(code, pc);
             const n = readS4(code, pc + 4);
             const k = stack.pop();
             let target = opPc + def;
-            // pairs are sorted: binary search
             let lo = 0, hi = n - 1;
             while (lo <= hi) {
               const mid = (lo + hi) >> 1;
@@ -333,7 +314,6 @@ export function execute(vm: VM, t: JThread, budget: number): void {
             break;
           }
 
-          // returns
           case 172: case 174: case 176: case 173: case 175: case 177: {
             let rv: unknown;
             if (op === 177) rv = undefined;
@@ -355,8 +335,7 @@ export function execute(vm: VM, t: JThread, budget: number): void {
             continue outer;
           }
 
-          // fields
-          case 178: { // getstatic
+          case 178: {
             const fld = vm.resolveField(cls, (code[pc] << 8) | code[pc + 1]);
             const fc = fld.cls;
             if (fc.state !== 2) {
@@ -368,7 +347,7 @@ export function execute(vm: VM, t: JThread, budget: number): void {
             if (fld.wide) stack.push(TOP);
             break;
           }
-          case 179: { // putstatic
+          case 179: {
             const fld = vm.resolveField(cls, (code[pc] << 8) | code[pc + 1]);
             const fc = fld.cls;
             if (fc.state !== 2) {
@@ -380,7 +359,7 @@ export function execute(vm: VM, t: JThread, budget: number): void {
             fc.statics[fld.slot] = stack.pop();
             break;
           }
-          case 180: { // getfield
+          case 180: {
             const fld = vm.resolveField(cls, (code[pc] << 8) | code[pc + 1]);
             pc += 2;
             const o = stack.pop() as JObject;
@@ -389,7 +368,7 @@ export function execute(vm: VM, t: JThread, budget: number): void {
             if (fld.wide) stack.push(TOP);
             break;
           }
-          case 181: { // putfield
+          case 181: {
             const fld = vm.resolveField(cls, (code[pc] << 8) | code[pc + 1]);
             pc += 2;
             if (fld.wide) stack.pop();
@@ -400,7 +379,6 @@ export function execute(vm: VM, t: JThread, budget: number): void {
             break;
           }
 
-          // invocation
           case 182: case 183: case 184: case 185: {
             const ref = vm.resolveMethod(cls, (code[pc] << 8) | code[pc + 1]);
             pc += op === 185 ? 4 : 2;
@@ -417,7 +395,6 @@ export function execute(vm: VM, t: JThread, budget: number): void {
                 vm.throwNew('java/lang/NullPointerException', `${ref.cls.javaName}.${ref.name}`);
               }
               if (op === 183) {
-                // invokespecial: super calls dispatch from the current class's superclass
                 if (ref.name !== '<init>' && !ref.isPrivate && (cls.access & 0x0020) !== 0
                     && cls.superClass && cls !== ref.cls && cls.isSubclassOf(ref.cls)) {
                   target = cls.superClass.vlookup(ref.key) ?? ref;
@@ -476,7 +453,7 @@ export function execute(vm: VM, t: JThread, budget: number): void {
           }
           case 186: vm.throwNew('java/lang/InternalError', 'invokedynamic is not supported');
 
-          case 187: { // new
+          case 187: {
             const c = vm.resolveClass(cls, (code[pc] << 8) | code[pc + 1]);
             if (c.state !== 2) {
               const r = vm.ensureInit(t, c);
@@ -487,30 +464,30 @@ export function execute(vm: VM, t: JThread, budget: number): void {
             stack.push(vm.newObject(c));
             break;
           }
-          case 188: { // newarray
+          case 188: {
             const atype = code[pc++];
             stack.push(vm.newArray(NEWARRAY_TYPES[atype], stack.pop()));
             break;
           }
-          case 189: { // anewarray
+          case 189: {
             const c = vm.resolveClass(cls, (code[pc] << 8) | code[pc + 1]);
             pc += 2;
             const n = stack.pop();
             stack.push(vm.newArray(c.isArray ? '[' + c.name : '[L' + c.name + ';', n));
             break;
           }
-          case 190: { // arraylength
+          case 190: {
             const a = stack.pop() as JArray;
             if (a === null) vm.throwNew('java/lang/NullPointerException', 'arraylength');
             stack.push(a.a.length);
             break;
           }
-          case 191: { // athrow
+          case 191: {
             const ex = stack.pop() as JObject;
             if (ex === null) vm.throwNew('java/lang/NullPointerException', 'throw null');
             throw new JavaThrow(ex);
           }
-          case 192: { // checkcast
+          case 192: {
             const c = vm.resolveClass(cls, (code[pc] << 8) | code[pc + 1]);
             pc += 2;
             const o = stack[stack.length - 1] as JObject | null;
@@ -519,27 +496,27 @@ export function execute(vm: VM, t: JThread, budget: number): void {
             }
             break;
           }
-          case 193: { // instanceof
+          case 193: {
             const c = vm.resolveClass(cls, (code[pc] << 8) | code[pc + 1]);
             pc += 2;
             const o = stack.pop() as JObject | null;
             stack.push(o !== null && vm.isAssignable(o.cls, c) ? 1 : 0);
             break;
           }
-          case 194: { // monitorenter
+          case 194: {
             const o = stack[stack.length - 1] as JObject | null;
             if (o === null) { stack.pop(); vm.throwNew('java/lang/NullPointerException', 'monitorenter'); }
             if (!vm.monitorEnter(t, o)) { f.pc = opPc; return; }
             stack.pop();
             break;
           }
-          case 195: { // monitorexit
+          case 195: {
             const o = stack.pop() as JObject | null;
             if (o === null) vm.throwNew('java/lang/NullPointerException', 'monitorexit');
             vm.monitorExit(t, o);
             break;
           }
-          case 196: { // wide
+          case 196: {
             const op2 = code[pc++];
             const idx = (code[pc] << 8) | code[pc + 1];
             pc += 2;
@@ -554,7 +531,7 @@ export function execute(vm: VM, t: JThread, budget: number): void {
             }
             break;
           }
-          case 197: { // multianewarray
+          case 197: {
             const c = vm.resolveClass(cls, (code[pc] << 8) | code[pc + 1]);
             const dims = code[pc + 2];
             pc += 3;
@@ -565,8 +542,8 @@ export function execute(vm: VM, t: JThread, budget: number): void {
           }
           case 198: if (stack.pop() === null) pc = opPc + s16((code[pc] << 8) | code[pc + 1]); else pc += 2; break;
           case 199: if (stack.pop() !== null) pc = opPc + s16((code[pc] << 8) | code[pc + 1]); else pc += 2; break;
-          case 200: pc = opPc + readS4(code, pc); break; // goto_w
-          case 201: stack.push(pc + 4); pc = opPc + readS4(code, pc); break; // jsr_w
+          case 200: pc = opPc + readS4(code, pc); break;
+          case 201: stack.push(pc + 4); pc = opPc + readS4(code, pc); break;
           default:
             throw new Error(`unknown opcode ${op} at ${cls.name}.${m.name}${m.desc}:${opPc}`);
         }
@@ -576,7 +553,6 @@ export function execute(vm: VM, t: JThread, budget: number): void {
         f.pc = opPc;
         throw e;
       }
-      // the faulting frame may not be the top one if a native pushed frames before throwing
       if (t.frames[t.frames.length - 1] === f) f.pc = opPc;
       if (!throwInto(vm, t, e.ex, true)) return;
       continue outer;
@@ -584,11 +560,6 @@ export function execute(vm: VM, t: JThread, budget: number): void {
   }
 }
 
-/**
- * Unwinds `t` until a handler for `ex` is found.
- * `exactTop`: the top frame's pc points at the faulting instruction (otherwise it points after an invoke).
- * Returns false if the thread died from an uncaught exception.
- */
 export function throwInto(vm: VM, t: JThread, ex: JObject, exactTop: boolean): boolean {
   let first = true;
   for (;;) {
@@ -616,7 +587,7 @@ export function throwInto(vm: VM, t: JThread, ex: JObject, exactTop: boolean): b
       return true;
     }
     if (f.lockObj) {
-      try { vm.monitorExit(t, f.lockObj); } catch { /* ignore */ }
+      try { vm.monitorExit(t, f.lockObj); } catch {  }
     }
     if (f.m.name === '<clinit>') vm.clinitDone(f.m.cls, false);
     t.frames.pop();

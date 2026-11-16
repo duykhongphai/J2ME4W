@@ -1,4 +1,3 @@
-// High-level entry point: loads a MIDlet suite and runs it on the VM. Host-agnostic.
 import { unzipSync } from 'fflate';
 import { VM } from './vm/vm';
 import { registerLangNatives } from './vm/natives/lang';
@@ -11,7 +10,6 @@ export interface MIDletInfo { name: string; icon: string; className: string }
 
 export interface Suite {
   files: Map<string, Uint8Array>;
-  /** Manifest attributes, overridden by JAD attributes. */
   properties: Record<string, string>;
   midlets: MIDletInfo[];
   name: string;
@@ -21,7 +19,6 @@ export function unzip(bytes: Uint8Array): Map<string, Uint8Array> {
   return new Map(Object.entries(unzipSync(bytes)));
 }
 
-/** Parses MANIFEST.MF / JAD "Key: value" attributes (with continuation lines). */
 export function parseAttributes(text: string): Record<string, string> {
   const out: Record<string, string> = {};
   let last: string | null = null;
@@ -48,7 +45,6 @@ export function loadSuite(jar: Uint8Array, jad?: string): Suite {
     if (parts.length >= 3 && parts[2]) midlets.push({ name: parts[0], icon: parts[1], className: parts[2] });
   }
   if (midlets.length === 0) {
-    // No MIDlet-1 attribute: guess a class extending MIDlet is not possible without parsing; look for common names.
     for (const k of files.keys()) {
       const m = /^([^/]*)\.class$/.exec(k);
       if (m && /midlet|main|game/i.test(m[1])) { midlets.push({ name: m[1], icon: '', className: m[1] }); break; }

@@ -1,9 +1,3 @@
-// On-screen keypad.
-//  - Styles: "phone" (D-pad with OK + 12 digit keys) and "gamepad" (8-way joystick + FIRE + small keys).
-//  - Placements: "portrait" (a panel under the screen) and "landscape" (translucent groups over the
-//    stage). Every key group is absolutely positioned from a default layout, which the user can
-//    override per style and placement in edit mode (drag to move, resize the selected group).
-//  - Multi-touch: every finger is tracked; the D-pad follows a sliding finger.
 import type { KeyItemPos, KeypadType } from './store';
 
 const UP = -1, DOWN = -2, LEFT = -3, RIGHT = -4, FIRE = -5, SOFT_L = -6, SOFT_R = -7, CLEAR = -8;
@@ -14,7 +8,6 @@ type Rect = { x: number; y: number; w: number; h: number };
 export interface KeypadHandlers {
   down(code: number): void;
   up(code: number): void;
-  /** Called when the user moved or resized key groups in edit mode. */
   layoutChanged?(key: string, layout: Record<string, KeyItemPos>): void;
   selectionChanged?(item: string | null): void;
 }
@@ -32,11 +25,6 @@ export const ITEM_NAMES: Record<string, string> = {
   digits: 'Number keys', fire: 'Fire', mini: 'Small keys',
 };
 
-/**
- * Default rectangles for every group, in px, inside a W x H keypad area.
- * The two soft keys (usually OK / Back in games) sit right above the D-pad, where the thumb already is;
- * Clear sits above the number keys.
- */
 function defaultRects(type: KeypadType, mode: KeypadMode, W: number, H: number): Record<string, Rect> {
   const r: Record<string, Rect> = {};
   const softH = 46, gap = 10;
@@ -102,7 +90,6 @@ export class Keypad {
 
   constructor(private root: HTMLElement, private h: KeypadHandlers) {
     root.addEventListener('contextmenu', (e) => e.preventDefault());
-    // edit mode intercepts pointer events before the keys see them
     root.addEventListener('pointerdown', (e) => this.editPointerDown(e), { capture: true });
   }
 
@@ -166,7 +153,6 @@ export class Keypad {
     if (this.W) this.place(this.mode, this.W, this.H);
   }
 
-  /** Positions every group for a keypad area of W x H px. */
   place(mode: KeypadMode, W: number, H: number): void {
     this.mode = mode;
     this.W = W;
@@ -192,7 +178,6 @@ export class Keypad {
     }
   }
 
-  /** Shows the game's soft key labels; without one, a dimmed "OK" / "Back" says what the key usually does. */
   setSoftLabels(left: string | null, right: string | null): void {
     if (!this.softL) return;
     [[this.softL, left, SOFT_FALLBACK[0]], [this.softR, right, SOFT_FALLBACK[1]]].forEach(([btn, text, fb]) => {
@@ -210,7 +195,6 @@ export class Keypad {
     this.root.querySelectorAll('.active').forEach((e) => e.classList.remove('active'));
   }
 
-  // ---------------------------------------------------------------- edit mode
   setEditing(on: boolean): void {
     this.editing = on;
     this.releaseAll();
@@ -239,7 +223,6 @@ export class Keypad {
     this.h.layoutChanged?.(key, next[key]);
   }
 
-  /** Changes the size of the selected group by `delta` (e.g. +0.1). */
   resizeSelected(delta: number): void {
     if (!this.selected) return;
     const p = this.currentPos(this.selected);
@@ -273,7 +256,6 @@ export class Keypad {
         y: Math.max(0.02, Math.min(0.98, start.y + (ev.clientY - sy) / this.H)),
         s: start.s,
       };
-      // live preview without saving on every move
       const def = defaultRects(this.type, this.mode, this.W, this.H)[id];
       const w = def.w * p.s, h = def.h * p.s;
       el.style.left = `${Math.round(p.x * this.W - w / 2)}px`;
@@ -297,13 +279,12 @@ export class Keypad {
     window.addEventListener('pointercancel', up);
   }
 
-  // ---------------------------------------------------------------- keys
   private press(code: number): void {
     const n = this.held.get(code) ?? 0;
     this.held.set(code, n + 1);
     if (n === 0) {
       this.h.down(code);
-      if (this.haptics) { try { navigator.vibrate?.(12); } catch { /* ignore */ } }
+      if (this.haptics) { try { navigator.vibrate?.(12); } catch {  } }
     }
   }
 
@@ -336,10 +317,9 @@ export class Keypad {
       e.preventDefault();
       if (pointer !== -1) return;
       pointer = e.pointerId;
-      try { b.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+      try { b.setPointerCapture(e.pointerId); } catch {  }
       b.classList.add('active');
       this.press(code);
-      // a held key produces key-repeat events, like a real phone
       delay = setTimeout(() => { repeat = setInterval(() => this.h.down(code), 100); }, 450);
     });
     const end = (e: PointerEvent) => {
@@ -364,14 +344,13 @@ export class Keypad {
       if (this.type === 'phone') out.add(FIRE);
       return out;
     }
-    const ang = (Math.atan2(dy, dx) * 180) / Math.PI; // 0 = right, 90 = down
+    const ang = (Math.atan2(dy, dx) * 180) / Math.PI;
     if (this.type === 'phone') {
       if (ang > -45 && ang <= 45) out.add(RIGHT);
       else if (ang > 45 && ang <= 135) out.add(DOWN);
       else if (ang > -135 && ang <= -45) out.add(UP);
       else out.add(LEFT);
     } else {
-      // 8-way: each axis is active within +-67.5 degrees of its direction
       if (Math.abs(ang) < 67.5) out.add(RIGHT);
       if (Math.abs(ang) > 112.5) out.add(LEFT);
       if (ang > 22.5 && ang < 157.5) out.add(DOWN);
@@ -399,7 +378,7 @@ export class Keypad {
     };
     this.dpad.addEventListener('pointerdown', (e) => {
       e.preventDefault();
-      try { this.dpad.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+      try { this.dpad.setPointerCapture(e.pointerId); } catch {  }
       set(e.pointerId, this.dpadDirections(e));
     });
     this.dpad.addEventListener('pointermove', (e) => {

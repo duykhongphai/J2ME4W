@@ -4,7 +4,6 @@ import javax.microedition.lcdui.game.*;
 import javax.microedition.midlet.*;
 import javax.microedition.rms.*;
 
-/** Deterministic MIDlet used by the headless test runner; prints what it observes. */
 public class ProbeMIDlet extends MIDlet implements CommandListener {
     private Display display;
     private List menu;
@@ -84,7 +83,6 @@ public class ProbeMIDlet extends MIDlet implements CommandListener {
         for (int i = 0; i < mp.length; i++) sb.append(mp[i] == -1 ? "." : mp[i] == 0xFF102030 ? "a" : mp[i] == 0xFFFF0000 ? "r" : mp[i] == 0xFF00FF00 ? "g" : "?");
         System.out.println("mutable " + m.isMutable() + " " + sb + " clip=" + g.getClipX() + "," + g.getClipY() + "," + g.getClipWidth() + "," + g.getClipHeight());
 
-        // transforms: a 3x2 image with distinct pixels
         int[] src = { 1, 2, 3, 4, 5, 6 };
         for (int i = 0; i < 6; i++) src[i] |= 0xFF000000;
         Image s = Image.createRGBImage(src, 3, 2, false);

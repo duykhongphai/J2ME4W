@@ -1,5 +1,3 @@
-// Parser for the Java .class file format (versions 45 - 52; J2ME uses 45-49).
-
 export const enum Tag {
   Utf8 = 1,
   Integer = 3,
@@ -49,7 +47,7 @@ export interface ExceptionHandler {
   startPc: number;
   endPc: number;
   handlerPc: number;
-  catchType: number; // cp index, 0 = any
+  catchType: number;
 }
 
 export interface CodeAttr {
@@ -57,7 +55,7 @@ export interface CodeAttr {
   maxLocals: number;
   code: Uint8Array;
   handlers: ExceptionHandler[];
-  lineNumbers: number[] | null; // flattened [startPc, line, ...]
+  lineNumbers: number[] | null;
 }
 
 export interface MemberInfo {
@@ -82,12 +80,10 @@ export interface ClassFile {
 
 export class ClassFormatError extends Error {}
 
-/** Decodes the JVM's "modified UTF-8". */
 export function decodeModifiedUtf8(b: Uint8Array, start: number, len: number): string {
   let out = '';
   let i = start;
   const end = start + len;
-  // fast path for ASCII
   let ascii = true;
   for (let k = start; k < end; k++) if (b[k] === 0 || b[k] >= 0x80) { ascii = false; break; }
   if (ascii) {
@@ -115,7 +111,7 @@ export function parseClassFile(bytes: Uint8Array): ClassFile {
   const u4 = () => { const v = dv.getUint32(p); p += 4; return v; };
 
   if (u4() !== 0xcafebabe) throw new ClassFormatError('bad magic');
-  u2(); // minor
+  u2();
   const major = u2();
   const cpCount = u2();
   const cp: CPEntry[] = new Array(cpCount).fill(null);

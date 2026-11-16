@@ -7,16 +7,15 @@ public final class NokiaDirectGraphics implements DirectGraphics {
     private final Graphics g;
     public NokiaDirectGraphics(Graphics g) { this.g = g; }
 
-    // Sprite transform as 2x2 matrix rows {a,b,c,d}: x' = a*x + b*y, y' = c*x + d*y
     private static final int[][] MAT = {
-        { 1, 0, 0, 1 },   // NONE
-        { 1, 0, 0, -1 },  // MIRROR_ROT180 (vertical flip)
-        { -1, 0, 0, 1 },  // MIRROR (horizontal flip)
-        { -1, 0, 0, -1 }, // ROT180
-        { 0, 1, 1, 0 },   // MIRROR_ROT270
-        { 0, -1, 1, 0 },  // ROT90 (clockwise)
-        { 0, 1, -1, 0 },  // ROT270
-        { 0, -1, -1, 0 }, // MIRROR_ROT90
+        { 1, 0, 0, 1 },
+        { 1, 0, 0, -1 },
+        { -1, 0, 0, 1 },
+        { -1, 0, 0, -1 },
+        { 0, 1, 1, 0 },
+        { 0, -1, 1, 0 },
+        { 0, 1, -1, 0 },
+        { 0, -1, -1, 0 },
     };
 
     static int toTransform(int manipulation) {
@@ -24,7 +23,6 @@ public final class NokiaDirectGraphics implements DirectGraphics {
         if ((manipulation & FLIP_HORIZONTAL) != 0) m = mul(MAT[2], m);
         if ((manipulation & FLIP_VERTICAL) != 0) m = mul(MAT[1], m);
         int rot = manipulation & 0x1FF;
-        // Nokia rotations are counter-clockwise
         if (rot == ROTATE_90) m = mul(MAT[6], m);
         else if (rot == ROTATE_180) m = mul(MAT[3], m);
         else if (rot == ROTATE_270) m = mul(MAT[5], m);

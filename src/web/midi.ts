@@ -1,14 +1,9 @@
-// Standard MIDI File parser: produces timed notes (seconds) with the channel state that applies to
-// each note (program, channel volume x expression, pitch bend at note-on), honoring tempo changes.
-
 export interface MidiNote {
   channel: number;
   note: number;
   velocity: number;
   program: number;
-  /** Channel volume x expression, 0..1. */
   volume: number;
-  /** Pitch bend at note-on in semitones (+-2 range). */
   bend: number;
   start: number;
   end: number;
@@ -26,7 +21,6 @@ export function parseMidi(data: Uint8Array): { notes: MidiNote[]; duration: numb
   p = 8 + hlen;
 
   type Ev = { tick: number; order: number; kind: number; ch: number; a: number; b: number };
-  // kind: 0 tempo, 1 program, 2 controller, 3 bend, 4 note off, 5 note on
   const events: Ev[] = [];
   let order = 0;
   for (let t = 0; t < ntracks && p + 8 <= data.length; t++) {
@@ -74,12 +68,11 @@ export function parseMidi(data: Uint8Array): { notes: MidiNote[]; duration: numb
         const lsb = data[p++], msb = data[p++];
         events.push({ tick, order: order++, kind: 3, ch, a: ((msb << 7) | lsb) - 8192, b: 0 });
       } else {
-        p += 2; // polyphonic aftertouch
+        p += 2;
       }
     }
     p = end;
   }
-  // state changes before notes at the same tick, note-offs before note-ons
   events.sort((x, y) => x.tick - y.tick || (x.kind - y.kind) || x.order - y.order);
 
   const program = new Array(16).fill(0);

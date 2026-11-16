@@ -1,5 +1,3 @@
-// Text helpers: charset encode/decode and Java-compatible number formatting/parsing.
-
 const utf8Enc = new TextEncoder();
 const singleByteTables = new Map<string, Map<number, number> | null>();
 
@@ -18,7 +16,6 @@ function normalizeEncoding(enc: string | null): string {
   }
 }
 
-/** Decodes bytes; returns null for unsupported encodings. */
 export function decodeBytes(bytes: Uint8Array, enc: string | null): string | null {
   const e = normalizeEncoding(enc);
   if (e === 'iso-8859-1' || e === 'us-ascii') {
@@ -35,7 +32,6 @@ export function decodeBytes(bytes: Uint8Array, enc: string | null): string | nul
   }
 }
 
-/** Encodes a string; returns null for unsupported encodings. */
 export function encodeString(s: string, enc: string | null): Uint8Array | null {
   const e = normalizeEncoding(enc);
   if (e === 'utf-8') return utf8Enc.encode(s);
@@ -52,7 +48,6 @@ export function encodeString(s: string, enc: string | null): Uint8Array | null {
     for (let i = 0; i < s.length; i++) { out[2 * i] = s.charCodeAt(i) >> 8; out[2 * i + 1] = s.charCodeAt(i) & 0xff; }
     return out;
   }
-  // single-byte charsets: build a reverse table from the decoder
   let table = singleByteTables.get(e);
   if (table === undefined) {
     table = null;
@@ -64,7 +59,7 @@ export function encodeString(s: string, enc: string | null): Uint8Array | null {
         table = new Map();
         for (let i = 0; i < 256; i++) table.set(chars.charCodeAt(i), i);
       }
-    } catch { /* unsupported */ }
+    } catch {  }
     singleByteTables.set(e, table);
   }
   if (!table) return null;
@@ -73,7 +68,6 @@ export function encodeString(s: string, enc: string | null): Uint8Array | null {
   return out;
 }
 
-/** Java's Double.toString / Float.toString formatting. */
 export function javaFloatingToString(v: number, isFloat: boolean): string {
   if (v !== v) return 'NaN';
   if (v === Infinity) return 'Infinity';
@@ -87,7 +81,6 @@ export function javaFloatingToString(v: number, isFloat: boolean): string {
   } else {
     exp = v.toExponential();
   }
-  // exp looks like "-1.2345e+3"
   const neg = exp[0] === '-';
   if (neg) exp = exp.slice(1);
   const ei = exp.indexOf('e');
@@ -111,7 +104,6 @@ export function javaFloatingToString(v: number, isFloat: boolean): string {
 
 const FLOAT_RE = /^[+-]?(NaN|Infinity|((\d+\.?\d*|\.\d+)([eE][+-]?\d+)?)[fFdD]?)$/;
 
-/** Java Double.parseDouble semantics; returns null if invalid. */
 export function parseJavaDouble(s: string): number | null {
   const t = s.trim();
   if (!FLOAT_RE.test(t)) return null;
@@ -120,7 +112,6 @@ export function parseJavaDouble(s: string): number | null {
   return Number.isNaN(v) && !clean.endsWith('NaN') ? null : v;
 }
 
-/** Integer/Long.parseX semantics. Returns null on error. */
 export function parseJavaInteger(s: string, radix: number, bits: 32 | 64): bigint | null {
   if (radix < 2 || radix > 36 || s.length === 0) return null;
   let i = 0;
@@ -148,6 +139,6 @@ function digitValue(c: number): number {
   if (c >= 48 && c <= 57) return c - 48;
   if (c >= 97 && c <= 122) return c - 87;
   if (c >= 65 && c <= 90) return c - 55;
-  if (c >= 0xff10 && c <= 0xff19) return c - 0xff10; // fullwidth digits
+  if (c >= 0xff10 && c <= 0xff19) return c - 0xff10;
   return -1;
 }

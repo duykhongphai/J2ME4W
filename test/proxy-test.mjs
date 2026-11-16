@@ -1,4 +1,3 @@
-// Network bridge test: TCP over WebSocket and HTTP, direct and through SOCKS5 / HTTP CONNECT upstream proxies.
 import http from 'node:http';
 import net from 'node:net';
 import { WebSocket } from 'ws';

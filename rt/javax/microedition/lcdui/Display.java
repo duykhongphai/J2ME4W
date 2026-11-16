@@ -14,7 +14,6 @@ public class Display {
     static Image screen;
     static final Vector serialQueue = new Vector();
 
-    // soft-key / menu state
     static Command leftCmd, rightCmd;
     static Vector leftMenu, rightMenu;
     static Vector menu;
@@ -80,13 +79,11 @@ public class Display {
     }
     public void callSerially(Runnable r) { runLater(r); }
 
-    /** Runs r on the event thread after the current event. */
     static void runLater(Runnable r) {
         synchronized (serialQueue) { serialQueue.addElement(r); }
         postEvent0(EventLoop.SERIAL, 0, 0);
     }
 
-    // ------------------------------------------------------------ painting
     static void requestRepaint() {
         if (!repaintPending) {
             repaintPending = true;
@@ -134,7 +131,6 @@ public class Display {
         }
     }
 
-    // ------------------------------------------------------------ commands / soft keys
     static void commandsChanged(Displayable d) {
         if (d != current) return;
         Vector cmds = d.softCommands();
@@ -143,7 +139,6 @@ public class Display {
             Command c = (Command) cmds.elementAt(i);
             if (c.isNegative()) neg.addElement(c); else pos.addElement(c);
         }
-        // Single-sided command sets: keep both soft keys useful.
         if (pos.isEmpty() && neg.size() > 1) { pos.addElement(neg.elementAt(0)); neg.removeElementAt(0); }
         if (neg.isEmpty() && pos.size() > 1) {
             neg.addElement(pos.elementAt(pos.size() - 1));
@@ -195,7 +190,6 @@ public class Display {
         requestRepaint();
     }
 
-    // ------------------------------------------------------------ natives
     static native int width0();
     static native int height0();
     static native Image screen0();
